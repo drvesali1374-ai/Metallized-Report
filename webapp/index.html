@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <title>PanTask - پنل مدیریت وظایف</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css" rel="stylesheet" type="text/css" />
+  <link href="https://cdn.jsdelivr.net/npm/react-toastify@10.0.0/dist/ReactToastify.min.css" rel="stylesheet" type="text/css" />
+  <style>
+    @font-face { font-family: 'B Nazanin'; src: local('B Nazanin'); }
+    @font-face { font-family: 'B Titr'; src: local('B Titr'); font-weight: bold; }
+    @font-face { font-family: 'B Mitra'; src: local('B Mitra'); }
+    @font-face { font-family: 'B Yekan'; src: local('B Yekan'); }
+    @font-face { font-family: 'irannastaligh'; src: local('IranNastaliq'); }
+
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; }
+    body { font-family: 'Vazirmatn', 'B Nazanin', Arial, sans-serif; background: #0f172a; color: white; direction: rtl; }
+
+    .glass {
+      background: rgba(255, 255, 255, 0.05);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .glass-dark {
+      background: rgba(0, 0, 0, 0.2);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-left: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .metallic-btn {
+      background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, rgba(255,255,255,0.05) 100%);
+      box-shadow: 0 4px 15px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.1);
+    }
+    .metallic-btn:active { transform: scale(0.97); }
+    .custom-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
+    .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 2px; }
+
+    @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes zoom-in { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+    @keyframes slide-in-from-top-2 { from { transform: translateY(-8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    @keyframes slide-in-from-right-4 { from { transform: translateX(16px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+    .animate-in { animation-fill-mode: both; }
+    .fade-in { animation-name: fade-in; }
+    .zoom-in-95 { animation-name: zoom-in; }
+    .slide-in-from-top-2 { animation-name: slide-in-from-top-2; }
+    .slide-in-from-right-4 { animation-name: slide-in-from-right-4; }
+    .duration-200 { animation-duration: 200ms; }
+    .duration-500 { animation-duration: 500ms; }
+    .duration-700 { animation-duration: 700ms; }
+
+    @media print {
+      .no-print { display: none !important; }
+      body { background: white !important; color: black !important; margin: 0 !important; padding: 0 !important; }
+      html { margin: 0 !important; padding: 0 !important; }
+      #root > * > * > .no-print { display: none !important; }
+    }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+</html>
