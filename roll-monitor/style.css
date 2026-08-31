@@ -1,0 +1,783 @@
+/* =====================================================
+   سامانهٔ مانیتورینگ صنعتی رول‌ها — استایل اصلی
+   تم تیرهٔ صنعتی | راست‌چین (RTL) | واکنش‌گرا
+   ===================================================== */
+
+/* ---------- ۱) فونت فارسی وزیرمتن (لوکال و آفلاین) ---------- */
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('lib/fonts/Vazirmatn-Regular.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('lib/fonts/Vazirmatn-Medium.woff2') format('woff2');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('lib/fonts/Vazirmatn-Bold.woff2') format('woff2');
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ---------- ۲) متغیرهای رنگ و پایه ---------- */
+:root {
+  /* پالت تیرهٔ مبتنی بر zinc (بدون رنگ آبی/نیلی) */
+  --bg: #09090b;
+  --bg-soft: #101013;
+  --surface: #17171b;
+  --surface-2: #1d1d22;
+  --border: #2a2a31;
+  --border-strong: #3a3a44;
+
+  --text: #f4f4f5;
+  --text-muted: #a1a1aa;
+  --text-faint: #71717a;
+
+  /* رنگ‌های تأکیدی شاخص‌ها */
+  --raw: #34d399;        /* سبز زمردی — رول خام */
+  --raw-soft: rgba(52, 211, 153, 0.12);
+  --metal: #fbbf24;      /* کهربایی — متالایز */
+  --metal-soft: rgba(251, 191, 36, 0.12);
+  --setup: #2dd4bf;      /* فیروزه‌ای — ستاپ‌ها */
+  --setup-soft: rgba(45, 212, 191, 0.12);
+  --uncut: #fb7185;      /* رز — برش‌نشده */
+  --uncut-soft: rgba(251, 113, 133, 0.12);
+  --danger: #ef4444;
+
+  --radius: 14px;
+  --radius-sm: 10px;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+  --font: 'Vazirmatn', 'Tahoma', 'Segoe UI', sans-serif;
+}
+
+/* ---------- ۳) ریست و پایه ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+
+/* بسیار مهم: ویژگی hidden همیشه بر هر display دیگری غلبه کند
+   (مانع نمایش پنجرهٔ مودال و لایه‌های پوشاننده در حالت بسته) */
+[hidden] { display: none !important; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  font-family: var(--font);
+  background:
+    radial-gradient(1200px 500px at 85% -10%, rgba(45, 212, 191, 0.07), transparent 60%),
+    radial-gradient(900px 420px at 0% 0%, rgba(251, 191, 36, 0.05), transparent 55%),
+    var(--bg);
+  color: var(--text);
+  line-height: 1.75;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* اسکرول‌بار سفارشی */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: var(--bg-soft); }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: #4b4b57; }
+
+code {
+  font-family: 'Consolas', 'Courier New', monospace;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0 6px;
+  font-size: 0.85em;
+  color: var(--metal);
+  direction: ltr;
+  display: inline-block;
+}
+
+/* دسترسی‌پذیری: حالت فوکوس واضح */
+:focus-visible {
+  outline: 2px solid var(--setup);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- ۴) قالب کلی: سربرگ + محتوا + پاصفحهٔ چسبیده ---------- */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh; /* پاصفحه همیشه پایین صفحه می‌ماند */
+}
+
+.app-main {
+  flex: 1;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px 20px 40px;
+}
+
+/* ---------- ۵) سربرگ ---------- */
+.app-header {
+  background: rgba(23, 23, 27, 0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+
+.header-inner {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 14px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.brand { display: flex; align-items: center; gap: 12px; }
+
+.brand-icon {
+  width: 46px; height: 46px;
+  display: grid; place-items: center;
+  border-radius: 12px;
+  color: var(--setup);
+  background: var(--setup-soft);
+  border: 1px solid rgba(45, 212, 191, 0.25);
+  flex-shrink: 0;
+}
+.brand-icon svg { width: 26px; height: 26px; }
+
+.brand-text h1 {
+  margin: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+.brand-text p {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.status-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.72rem;
+  font-weight: 500;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+}
+.badge svg { width: 14px; height: 14px; }
+.badge-offline { color: var(--raw); border-color: rgba(52, 211, 153, 0.3); background: var(--raw-soft); }
+.badge-db.ok { color: var(--raw); border-color: rgba(52, 211, 153, 0.3); }
+.badge-db.err { color: var(--danger); border-color: rgba(239, 68, 68, 0.4); }
+
+/* ---------- ۶) تب‌ها ---------- */
+.tabs {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 20px;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+}
+
+.tab-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px 14px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  font-family: var(--font);
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 0.2s ease, border-color 0.2s ease;
+}
+.tab-btn svg { width: 17px; height: 17px; }
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active {
+  color: var(--setup);
+  border-bottom-color: var(--setup);
+}
+
+/* نقطهٔ هشدار روی تب (وقتی داده‌ای نیست) */
+.tab-dot {
+  position: absolute;
+  top: 9px;
+  inset-inline-end: 6px;
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--uncut);
+}
+
+/* ---------- ۷) نماها (بخش‌ها) ---------- */
+.view { display: none; animation: fadeIn 0.35s ease; }
+.view.active { display: block; }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ---------- ۸) کارت‌های شاخص داشبورد ---------- */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 18px;
+  margin-bottom: 22px;
+}
+
+.kpi-card {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(160deg, var(--surface) 0%, var(--surface-2) 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+  transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+}
+.kpi-card:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow);
+  border-color: var(--border-strong);
+}
+/* نوار رنگی بالای هر کارت */
+.kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0; right: 0; left: 0;
+  height: 3px;
+}
+
+.kpi-raw::before        { background: var(--raw); }
+.kpi-metallized::before { background: var(--metal); }
+.kpi-setup::before      { background: var(--setup); }
+.kpi-uncut::before      { background: var(--uncut); }
+
+.kpi-icon {
+  width: 48px; height: 48px;
+  border-radius: 12px;
+  display: grid; place-items: center;
+  flex-shrink: 0;
+}
+.kpi-icon svg { width: 25px; height: 25px; }
+
+.kpi-raw .kpi-icon        { color: var(--raw);   background: var(--raw-soft); }
+.kpi-metallized .kpi-icon { color: var(--metal); background: var(--metal-soft); }
+.kpi-setup .kpi-icon      { color: var(--setup); background: var(--setup-soft); }
+.kpi-uncut .kpi-icon      { color: var(--uncut); background: var(--uncut-soft); }
+
+.kpi-body { min-width: 0; flex: 1; }
+.kpi-title {
+  margin: 0 0 2px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.kpi-value {
+  font-size: 2.6rem;
+  font-weight: 700;
+  line-height: 1.25;
+  letter-spacing: -1px;
+}
+.kpi-raw .kpi-value        { color: var(--raw); }
+.kpi-metallized .kpi-value { color: var(--metal); }
+.kpi-setup .kpi-value      { color: var(--setup); }
+.kpi-uncut .kpi-value      { color: var(--uncut); }
+
+.kpi-desc {
+  margin: 4px 0 0;
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+.kpi-meta {
+  margin: 8px 0 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+}
+
+/* حالت هشدار برای مقدار منفی (رول برش‌نشده) */
+.kpi-card.negative { border-color: rgba(239, 68, 68, 0.5); }
+.kpi-card.negative::before { background: var(--danger); }
+.kpi-card.negative .kpi-value { color: var(--danger); animation: pulse 1.6s ease infinite; }
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
+/* ---------- ۹) کارت فرمول ---------- */
+.formula-card, .panel, .notice-panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 20px;
+}
+
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 14px;
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+.section-title svg { width: 18px; height: 18px; color: var(--text-muted); }
+
+.formula-box {
+  background: var(--bg-soft);
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 14px 18px;
+  text-align: center;
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--setup);
+  margin-bottom: 12px;
+}
+.formula-box.negative { color: var(--danger); border-color: rgba(239, 68, 68, 0.5); }
+
+.formula-notes {
+  margin: 0;
+  padding-inline-start: 20px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  display: grid;
+  gap: 6px;
+}
+
+/* ---------- ۱۰) پنل‌های عمومی ---------- */
+.import-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 18px;
+  margin-bottom: 18px;
+}
+
+.panel-head { margin-bottom: 14px; }
+.panel-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.panel-head h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  flex-wrap: wrap;
+}
+.panel-icon {
+  width: 34px; height: 34px;
+  border-radius: 9px;
+  display: grid; place-items: center;
+  flex-shrink: 0;
+}
+.panel-icon svg { width: 18px; height: 18px; }
+.icon-raw   .panel-icon, .panel-icon.icon-raw   { color: var(--raw);   background: var(--raw-soft); }
+.icon-metal .panel-icon, .panel-icon.icon-metal { color: var(--metal); background: var(--metal-soft); }
+.icon-setup .panel-icon, .panel-icon.icon-setup { color: var(--setup); background: var(--setup-soft); }
+.icon-list  .panel-icon, .panel-icon.icon-list  { color: var(--uncut); background: var(--uncut-soft); }
+
+.panel-desc {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.file-hint {
+  font-size: 0.72rem;
+  padding: 2px 8px;
+}
+
+/* ---------- ۱۱) ناحیهٔ رهاکردن فایل (Dropzone) ---------- */
+.dropzone {
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-soft);
+  padding: 26px 16px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.15s ease;
+  user-select: none;
+}
+.dropzone svg { width: 30px; height: 30px; color: var(--text-faint); margin-bottom: 6px; }
+.dropzone p { margin: 0; font-size: 0.85rem; color: var(--text-muted); }
+.dropzone .drop-hint { margin-top: 6px; font-size: 0.72rem; color: var(--text-faint); }
+
+.dropzone:hover, .dropzone:focus-visible, .dropzone.dragover {
+  border-color: var(--setup);
+  background: var(--setup-soft);
+  transform: scale(1.01);
+}
+.dropzone.dragover svg, .dropzone:hover svg { color: var(--setup); }
+.dropzone.loading { pointer-events: none; opacity: 0.6; }
+
+/* ---------- ۱۲) وضعیت ایمپورت ---------- */
+.import-status {
+  margin-top: 14px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  padding: 12px 16px;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.import-status .status-empty { margin: 0; color: var(--text-faint); }
+
+.import-status.ok   { border-color: rgba(52, 211, 153, 0.4); }
+.import-status.err  { border-color: rgba(239, 68, 68, 0.5); color: #fda4af; }
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0;
+  flex-wrap: wrap;
+}
+.status-row b { color: var(--text); font-weight: 600; }
+.status-row .num { color: var(--setup); font-weight: 700; }
+.status-icon { width: 16px; height: 16px; flex-shrink: 0; }
+.status-icon.ok  { color: var(--raw); }
+.status-icon.err { color: var(--danger); }
+
+/* ---------- ۱۳) پیش‌نمایش داده‌ها ---------- */
+.import-preview { margin-top: 12px; }
+.import-preview summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  color: var(--setup);
+  font-weight: 500;
+  padding: 4px 0;
+  user-select: none;
+}
+.import-preview summary:hover { text-decoration: underline; }
+
+/* ---------- ۱۴) جدول‌ها ---------- */
+.table-wrap { overflow-x: auto; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+.table-scroll { max-height: 420px; overflow-y: auto; } /* حداکثر ارتفاع با اسکرول */
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.78rem;
+  background: var(--bg-soft);
+}
+.data-table th, .data-table td {
+  padding: 9px 12px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.data-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+.data-table tbody tr:hover { background: rgba(45, 212, 191, 0.04); }
+.data-table td.ltr { direction: ltr; text-align: left; font-family: 'Consolas', monospace; font-size: 0.75rem; }
+.data-table .film-r { color: var(--raw); font-weight: 700; }
+.data-table td.empty-cell { color: var(--text-faint); }
+
+/* ردیف‌های جدول ستاپ */
+.setup-table td.count-cell { color: var(--metal); font-weight: 700; font-size: 0.9rem; }
+.setup-table td.type-cell { color: var(--setup); font-weight: 600; }
+
+/* ---------- ۱۵) فرم‌ها ---------- */
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.field label {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+.field .req { color: var(--uncut); }
+.field .unit { color: var(--text-faint); font-weight: 400; font-size: 0.72rem; }
+
+.field input {
+  font-family: var(--font);
+  font-size: 0.9rem;
+  color: var(--text);
+  background: var(--bg-soft);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  width: 100%;
+}
+.field input::placeholder { color: var(--text-faint); }
+.field input:hover { border-color: #4b4b57; }
+.field input:focus {
+  outline: none;
+  border-color: var(--setup);
+  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.15);
+}
+.field input.invalid { border-color: var(--danger); box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12); }
+
+.field-error {
+  margin: 0;
+  font-size: 0.7rem;
+  color: #fda4af;
+}
+
+.field-actions {
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  padding-top: 4px;
+}
+
+/* ---------- ۱۶) دکمه‌ها ---------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font);
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 10px 20px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  cursor: pointer;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.1s ease, box-shadow 0.2s ease;
+  min-height: 44px; /* هدف لمسی مناسب */
+}
+.btn svg { width: 16px; height: 16px; }
+.btn:active { transform: scale(0.97); }
+
+.btn-primary {
+  background: var(--setup);
+  color: #04211e;
+}
+.btn-primary:hover { background: #45e0cc; box-shadow: 0 6px 18px rgba(45, 212, 191, 0.25); }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border-strong);
+}
+.btn-ghost:hover { color: var(--text); border-color: #4b4b57; background: var(--surface); }
+
+.btn-danger {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fda4af;
+  border-color: rgba(239, 68, 68, 0.35);
+}
+.btn-danger:hover { background: rgba(239, 68, 68, 0.22); color: #fecaca; }
+
+.btn-icon {
+  width: 36px; height: 36px;
+  min-height: 36px;
+  padding: 0;
+  border-radius: 9px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #fda4af;
+}
+.btn-icon:hover { background: rgba(239, 68, 68, 0.25); color: #fff; }
+
+/* ---------- ۱۷) چیپ‌های خلاصه ---------- */
+.panel-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.chip {
+  font-size: 0.72rem;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.chip-strong {
+  color: var(--metal);
+  border-color: rgba(251, 191, 36, 0.35);
+  background: var(--metal-soft);
+  font-weight: 700;
+}
+
+/* ---------- ۱۸) نکات و راهنما ---------- */
+.tips-list {
+  margin: 0;
+  padding-inline-start: 20px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+  display: grid;
+  gap: 6px;
+}
+
+/* ---------- ۱۹) پنجرهٔ تأیید (Modal) ---------- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  z-index: 100;
+  padding: 20px;
+  animation: fadeIn 0.2s ease;
+}
+
+.modal-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  padding: 24px;
+  box-shadow: var(--shadow);
+}
+.modal-card h3 { margin: 0 0 8px; font-size: 1rem; }
+.modal-card p { margin: 0 0 20px; font-size: 0.85rem; color: var(--text-muted); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+
+/* ---------- ۲۰) اعلان‌ها (Toast) ---------- */
+.toast-stack {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 200;
+  max-width: min(380px, calc(100vw - 32px));
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  font-size: 0.82rem;
+  box-shadow: var(--shadow);
+  animation: toastIn 0.3s cubic-bezier(0.21, 1.02, 0.73, 1);
+}
+.toast.leaving { animation: toastOut 0.25s ease forwards; }
+
+.toast svg { width: 18px; height: 18px; flex-shrink: 0; margin-top: 2px; }
+.toast-success { border-color: rgba(52, 211, 153, 0.45); }
+.toast-success svg { color: var(--raw); }
+.toast-error { border-color: rgba(239, 68, 68, 0.5); }
+.toast-error svg { color: var(--danger); }
+.toast-warning { border-color: rgba(251, 191, 36, 0.45); }
+.toast-warning svg { color: var(--metal); }
+.toast-info svg { color: var(--setup); }
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(16px) scale(0.96); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+@keyframes toastOut {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(10px) scale(0.97); }
+}
+
+/* ---------- ۲۱) پاصفحه ---------- */
+.app-footer {
+  margin-top: auto; /* چسبیدن به پایین صفحه */
+  border-top: 1px solid var(--border);
+  background: var(--bg-soft);
+  padding: 14px 20px;
+  text-align: center;
+  /* رعایت ناحیهٔ امن گوشی‌های همراه */
+  padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+}
+.app-footer p {
+  margin: 0;
+  font-size: 0.72rem;
+  color: var(--text-faint);
+}
+
+/* ---------- ۲۲) حالت خالی جدول ---------- */
+.empty-state {
+  text-align: center;
+  padding: 36px 16px;
+  color: var(--text-faint);
+  font-size: 0.85rem;
+}
+.empty-state svg { width: 34px; height: 34px; opacity: 0.5; margin-bottom: 8px; }
+
+/* ---------- ۲۳) واکنش‌گرایی ---------- */
+@media (max-width: 640px) {
+  .header-inner { padding: 12px 14px; }
+  .app-main { padding: 16px 12px 32px; }
+
+  .kpi-value { font-size: 2.1rem; }
+  .kpi-card { padding: 16px; gap: 12px; }
+  .kpi-icon { width: 42px; height: 42px; }
+  .kpi-icon svg { width: 21px; height: 21px; }
+
+  .tabs { padding: 0 10px; }
+  .tab-btn { padding: 9px 13px 12px; font-size: 0.82rem; }
+
+  .form-grid { grid-template-columns: 1fr 1fr; }
+  .field-actions { grid-column: 1 / -1; }
+
+  .panel, .formula-card { padding: 16px; }
+  .toast-stack { left: 10px; right: 10px; max-width: none; }
+}
+
+@media (max-width: 420px) {
+  .form-grid { grid-template-columns: 1fr; }
+  .header-inner { flex-direction: column; align-items: stretch; }
+  .status-badges { justify-content: center; }
+}
+
+/* ---------- ۲۴) کاهش حرکت برای کاربران حساس ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

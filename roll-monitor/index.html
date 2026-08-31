@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>مانیتورینگ صنعتی | داشبورد رول‌ها</title>
+  <!-- آیکون برنامه (به صورت درون‌خطی - بدون نیاز به اینترنت) -->
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏭</text></svg>">
+  <!-- استایل اصلی برنامه (لوکال) -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <!-- ================= قالب اصلی برنامه ================= -->
+  <div class="app-shell">
+
+    <!-- ================= سربرگ ================= -->
+    <header class="app-header">
+      <div class="header-inner">
+        <div class="brand">
+          <span class="brand-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M17 18h1"/><path d="M12 18h1"/><path d="M7 18h1"/></svg>
+          </span>
+          <div class="brand-text">
+            <h1>مانیتورینگ صنعتی رول‌ها</h1>
+            <p>داشبورد تحلیل تولید — رول خام، متالایز و ستاپ‌ها</p>
+          </div>
+        </div>
+
+        <!-- نشان‌های وضعیت -->
+        <div class="status-badges">
+          <span class="badge badge-offline" id="badge-offline">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1 1 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>
+            کاملاً آفلاین
+          </span>
+          <span class="badge badge-db" id="badge-db" title="وضعیت پایگاه‌داده محلی مرورگر">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg>
+            <span id="badge-db-text">در حال اتصال…</span>
+          </span>
+        </div>
+      </div>
+
+      <!-- ================= نوار تب‌ها ================= -->
+      <nav class="tabs" role="tablist" aria-label="بخش‌های برنامه">
+        <button class="tab-btn active" role="tab" aria-selected="true" aria-controls="view-dashboard" data-view="dashboard" id="tab-dashboard">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+          داشبورد
+        </button>
+        <button class="tab-btn" role="tab" aria-selected="false" aria-controls="view-import" data-view="import" id="tab-import">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+          ورود داده‌ها
+          <span class="tab-dot" id="dot-import" hidden title="داده‌ای وارد نشده است"></span>
+        </button>
+        <button class="tab-btn" role="tab" aria-selected="false" aria-controls="view-setup" data-view="setup" id="tab-setup">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/></svg>
+          رول‌های ستاپ
+          <span class="tab-dot" id="dot-setup" hidden title="رکوردی ثبت نشده است"></span>
+        </button>
+      </nav>
+    </header>
+
+    <!-- ================= محتوای اصلی ================= -->
+    <main class="app-main">
+
+      <!-- ---------- بخش ۱: داشبورد ---------- -->
+      <section class="view active" id="view-dashboard" role="tabpanel" aria-labelledby="tab-dashboard">
+
+        <!-- کارت‌های شاخص -->
+        <div class="kpi-grid">
+
+          <!-- شاخص ۱: رول‌های خام -->
+          <article class="kpi-card kpi-raw" aria-label="تعداد رول‌های خام">
+            <div class="kpi-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+            </div>
+            <div class="kpi-body">
+              <h3 class="kpi-title">رول‌های خام</h3>
+              <div class="kpi-value" id="kpi-raw">۰</div>
+              <p class="kpi-desc">ردیف‌های فایل <code>rolls</code> با حرف دومِ «نوع فیلم» برابر R</p>
+              <p class="kpi-meta" id="kpi-raw-meta">در انتظار بارگذاری فایل رول‌های موجود…</p>
+            </div>
+          </article>
+
+          <!-- شاخص ۲: رول‌های متالایز شده -->
+          <article class="kpi-card kpi-metallized" aria-label="تعداد رول‌های متالایز شده">
+            <div class="kpi-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+            </div>
+            <div class="kpi-body">
+              <h3 class="kpi-title">رول‌های متالایز شده</h3>
+              <div class="kpi-value" id="kpi-metallized">۰</div>
+              <p class="kpi-desc">ردیف‌های فایل <code>Archived Rolls</code> با حرف دومِ «نوع فیلم» برابر R</p>
+              <p class="kpi-meta" id="kpi-metallized-meta">در انتظار بارگذاری فایل سابقه رول‌ها…</p>
+            </div>
+          </article>
+
+          <!-- شاخص ۳: کل رول‌های ستاپ‌ها -->
+          <article class="kpi-card kpi-setup" aria-label="تعداد کل رول‌های ستاپ‌ها">
+            <div class="kpi-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/></svg>
+            </div>
+            <div class="kpi-body">
+              <h3 class="kpi-title">کل رول‌های ستاپ‌ها</h3>
+              <div class="kpi-value" id="kpi-setup-total">۰</div>
+              <p class="kpi-desc">جمع ستون «تعداد رول» از تمام رکوردهای ثبت‌شده</p>
+              <p class="kpi-meta" id="kpi-setup-meta">هنوز رولی برای ستاپ‌ها ثبت نشده است</p>
+            </div>
+          </article>
+
+          <!-- شاخص ۴: رول‌های برش نشده -->
+          <article class="kpi-card kpi-uncut" aria-label="تعداد رول‌های برش نشده">
+            <div class="kpi-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
+            </div>
+            <div class="kpi-body">
+              <h3 class="kpi-title">رول‌های برش‌نشده</h3>
+              <div class="kpi-value" id="kpi-uncut">۰</div>
+              <p class="kpi-desc">کل ستاپ‌ها منهای مجموع رول‌های خام و متالایز</p>
+              <p class="kpi-meta" id="kpi-uncut-meta">—</p>
+            </div>
+          </article>
+        </div>
+
+        <!-- کارت شفاف‌سازی فرمول محاسبه -->
+        <article class="formula-card">
+          <h3 class="section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            نحوه محاسبه شاخص‌ها
+          </h3>
+          <div class="formula-box" dir="rtl" id="formula-box">
+            <span>رول‌های برش‌نشده = کل ستاپ‌ها − (خام + متالایز)</span>
+          </div>
+          <ul class="formula-notes">
+            <li><b>رول خام:</b> ردیف‌هایی از <code>rolls.xlsx</code> که حرف دومِ ستون «نوع فیلم» آن‌ها <code>R</code> باشد (مانند <code>FRN21</code> یا <code>KRN21</code>).</li>
+            <li><b>رول متالایز:</b> ردیف‌هایی از <code>Archived Rolls.xlsx</code> که حرف دومِ «نوع فیلم» آن‌ها <code>R</code> باشد.</li>
+            <li><b>کل ستاپ‌ها:</b> مجموع مقادیر «تعداد رول» در پنل «رول‌های ستاپ».</li>
+            <li><b>برش‌نشده:</b> <code>کل ستاپ‌ها − (خام + متالایز)</code></li>
+          </ul>
+        </article>
+      </section>
+
+      <!-- ---------- بخش ۲: ورود داده‌ها (ایمپورت اکسل) ---------- -->
+      <section class="view" id="view-import" role="tabpanel" aria-labelledby="tab-import" hidden>
+
+        <div class="import-grid">
+
+          <!-- کارت ایمپورت: رول‌های موجود -->
+          <article class="panel import-card" id="card-rolls">
+            <header class="panel-head">
+              <h3>
+                <span class="panel-icon icon-raw" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+                </span>
+                رول‌های موجود
+                <code class="file-hint">rolls.xlsx</code>
+              </h3>
+              <p class="panel-desc">رول‌های فعال و موجود در انبار. این فایل مبنای محاسبهٔ «رول‌های خام» است.</p>
+            </header>
+
+            <div class="dropzone" id="drop-rolls" role="button" tabindex="0" aria-label="انتخاب یا رهاکردن فایل rolls.xlsx">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+              <p><b>فایل را اینجا رها کنید</b> یا برای انتخاب کلیک کنید</p>
+              <p class="drop-hint">فقط فایل‌های <code>.xlsx</code> و <code>.xls</code> — دارای ستون «نوع فیلم»</p>
+              <input type="file" id="file-rolls" accept=".xlsx,.xls" hidden aria-hidden="true">
+            </div>
+
+            <div class="import-status" id="status-rolls" aria-live="polite">
+              <p class="status-empty">هنوز فایلی بارگذاری نشده است.</p>
+            </div>
+
+            <details class="import-preview" id="preview-wrap-rolls" hidden>
+              <summary>پیش‌نمایش ۲۰ ردیف اول داده‌های ذخیره‌شده</summary>
+              <div class="table-wrap">
+                <table class="data-table" id="preview-rolls"></table>
+              </div>
+            </details>
+          </article>
+
+          <!-- کارت ایمپورت: سابقه رول‌ها -->
+          <article class="panel import-card" id="card-archived">
+            <header class="panel-head">
+              <h3>
+                <span class="panel-icon icon-metal" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+                </span>
+                سابقه رول‌ها (آرشیو)
+                <code class="file-hint">Archived Rolls.xlsx</code>
+              </h3>
+              <p class="panel-desc">رول‌هایی که دیگر با مشخصات فعلی نیستند. مبنای محاسبهٔ «رول‌های متالایز شده».</p>
+            </header>
+
+            <div class="dropzone" id="drop-archived" role="button" tabindex="0" aria-label="انتخاب یا رهاکردن فایل Archived Rolls.xlsx">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+              <p><b>فایل را اینجا رها کنید</b> یا برای انتخاب کلیک کنید</p>
+              <p class="drop-hint">فقط فایل‌های <code>.xlsx</code> و <code>.xls</code> — دارای ستون «نوع فیلم»</p>
+              <input type="file" id="file-archived" accept=".xlsx,.xls" hidden aria-hidden="true">
+            </div>
+
+            <div class="import-status" id="status-archived" aria-live="polite">
+              <p class="status-empty">هنوز فایلی بارگذاری نشده است.</p>
+            </div>
+
+            <details class="import-preview" id="preview-wrap-archived" hidden>
+              <summary>پیش‌نمایش ۲۰ ردیف اول داده‌های ذخیره‌شده</summary>
+              <div class="table-wrap">
+                <table class="data-table" id="preview-archived"></table>
+              </div>
+            </details>
+          </article>
+        </div>
+
+        <article class="panel notice-panel">
+          <h3 class="section-title">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+            نکات مهم ورود داده‌ها
+          </h3>
+          <ul class="tips-list">
+            <li>فایل‌ها به‌صورت <b>کاملاً محلی</b> در مرورگر شما خوانده می‌شوند و هیچ داده‌ای به هیچ سروری ارسال نمی‌شود.</li>
+            <li>بارگذاری مجدد هر فایل، داده‌های قبلی همان جدول را <b>جایگزین</b> می‌کند.</li>
+            <li>ستون «نوع فیلم» باید دقیقاً با این عنوان در ردیف اول فایل وجود داشته باشد؛ در غیر این صورت پیام خطا دریافت می‌کنید.</li>
+            <li>ردیف‌هایی که «نوع فیلم» آن‌ها خالی است، در هیچ‌کدام از شاخص‌ها حساب نمی‌شوند.</li>
+          </ul>
+        </article>
+      </section>
+
+      <!-- ---------- بخش ۳: پنل تعریف رول‌های ستاپ ---------- -->
+      <section class="view" id="view-setup" role="tabpanel" aria-labelledby="tab-setup" hidden>
+
+        <!-- فرم ورود اطلاعات -->
+        <article class="panel">
+          <header class="panel-head">
+            <h3>
+              <span class="panel-icon icon-setup" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+              </span>
+              ثبت رول جدید برای ستاپ
+            </h3>
+            <p class="panel-desc">مشخصات هر رول را وارد کرده و ذخیره کنید. هر رکورد شامل شماره ستاپ، شماره دستگاه، عرض، نوع و تعداد رول است.</p>
+          </header>
+
+          <form id="setup-form" novalidate>
+            <div class="form-grid">
+              <div class="field">
+                <label for="f-setup">شماره ستاپ <b class="req">*</b></label>
+                <input type="number" id="f-setup" name="setupNumber" min="0" step="1" inputmode="numeric" placeholder="مثلاً ۴۰" autocomplete="off" required>
+                <p class="field-error" id="err-setup" hidden></p>
+              </div>
+
+              <div class="field">
+                <label for="f-machine">شماره دستگاه <b class="req">*</b></label>
+                <input type="number" id="f-machine" name="machineNumber" min="0" step="1" inputmode="numeric" placeholder="مثلاً ۱۴" autocomplete="off" required>
+                <p class="field-error" id="err-machine" hidden></p>
+              </div>
+
+              <div class="field">
+                <label for="f-width">عرض رول <span class="unit">(میلی‌متر)</span> <b class="req">*</b></label>
+                <input type="number" id="f-width" name="rollWidth" min="1" step="1" inputmode="numeric" placeholder="مثلاً ۱۷۴۰" autocomplete="off" required>
+                <p class="field-error" id="err-width" hidden></p>
+              </div>
+
+              <div class="field">
+                <label for="f-type">نوع رول <b class="req">*</b></label>
+                <input type="text" id="f-type" name="rollType" list="roll-types" placeholder="مثلاً FRN21" autocomplete="off" required>
+                <datalist id="roll-types">
+                  <option value="FRN21">فیلم BOPP — خام</option>
+                  <option value="KRN21">فیلم CPP — خام</option>
+                </datalist>
+                <p class="field-error" id="err-type" hidden></p>
+              </div>
+
+              <div class="field">
+                <label for="f-count">تعداد رول <b class="req">*</b></label>
+                <input type="number" id="f-count" name="rollCount" min="1" step="1" inputmode="numeric" placeholder="مثلاً ۲" autocomplete="off" required>
+                <p class="field-error" id="err-count" hidden></p>
+              </div>
+
+              <div class="field field-actions">
+                <button type="submit" class="btn btn-primary" id="btn-save-roll">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+                  ذخیره رکورد
+                </button>
+                <button type="reset" class="btn btn-ghost">پاک‌کردن فرم</button>
+              </div>
+            </div>
+          </form>
+        </article>
+
+        <!-- جدول رکوردهای ثبت‌شده -->
+        <article class="panel">
+          <header class="panel-head panel-head-row">
+            <h3>
+              <span class="panel-icon icon-list" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              </span>
+              رول‌های ثبت‌شدهٔ ستاپ‌ها
+            </h3>
+            <div class="panel-tools">
+              <span class="chip" id="chip-records">۰ رکورد</span>
+              <span class="chip chip-strong" id="chip-total">مجموع: ۰ رول</span>
+              <button type="button" class="btn btn-danger" id="btn-clear-setups" hidden>
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+                حذف همه
+              </button>
+            </div>
+          </header>
+
+          <div class="table-wrap table-scroll" id="setup-table-wrap">
+            <!-- جدول با جاوااسکریپت پر می‌شود -->
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <!-- ================= پاصفحه (چسبیده به پایین) ================= -->
+    <footer class="app-footer">
+      <p>سامانهٔ مانیتورینگ صنعتی — نسخهٔ ۱٫۰ · تمام پردازش‌ها و ذخیره‌سازی داده‌ها به‌صورت محلی در مرورگر شما (IndexedDB) انجام می‌شود.</p>
+    </footer>
+  </div>
+
+  <!-- ================= پنجرهٔ تأیید (Modal) ================= -->
+  <div class="modal-overlay" id="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-msg">
+      <h3 id="modal-title">تأیید عملیات</h3>
+      <p id="modal-msg"></p>
+      <div class="modal-actions">
+        <button type="button" class="btn btn-ghost" id="modal-cancel">انصراف</button>
+        <button type="button" class="btn btn-danger" id="modal-confirm">بله، انجام بده</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= اعلان‌ها (Toast) ================= -->
+  <div class="toast-stack" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+  <!-- ================= اسکریپت‌های لوکال (بدون CDN) ================= -->
+  <script src="lib/dexie.min.js"></script>
+  <script src="lib/xlsx.full.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
