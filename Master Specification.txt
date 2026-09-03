@@ -1,0 +1,2899 @@
+# Master Specification — بازطراحی و توسعه کامل Roll Monitor
+
+## 1. نقش و مأموریت شما
+
+شما یک Senior Frontend Engineer و Software Architect متخصص در ساخت Web Applicationهای صنعتی، Offline-First و Data-Intensive هستید.
+
+یک پروژه موجود با نام:
+
+`Metallized-Report`
+
+و مسیر:
+
+`roll-monitor/`
+
+در اختیار شماست.
+
+قبل از هرگونه تغییر، **تمام فایل‌های موجود در مسیر `roll-monitor` را با دقت بررسی کنید** و معماری، UI، دیتابیس، نام‌گذاری‌ها، توابع موجود، وابستگی‌ها و محدودیت‌های فعلی پروژه را کاملاً درک کنید.
+
+هدف این نیست که صرفاً چند قابلیت به پروژه فعلی اضافه شود؛ هدف، تبدیل پروژه فعلی به یک سیستم حرفه‌ای:
+
+> **Roll Monitoring / Setup Management / Production Traceability System**
+
+است.
+
+هرجا معماری فعلی برای نیازمندی‌های جدید مناسب نیست، آن را با حفظ سازگاری و منطق صحیح بازطراحی کنید.
+
+---
+
+# 2. آزادی عمل در طراحی
+
+نیازمندی‌ها و قوانین کسب‌وکار که در این سند مشخص شده‌اند **قطعی هستند**.
+
+اما در مواردی مانند:
+
+* معماری فایل‌ها
+* نام‌گذاری توابع
+* ساختار ماژول‌های JavaScript
+* نحوهٔ طراحی UI
+* نوع Componentها
+* روش بهینه‌سازی
+* روش Cache
+* روش Grouping
+* نحوهٔ نمایش هشدارها
+* طراحی جدول‌ها
+* Tooltipها
+* Animationها
+* UX
+* ساختار داخلی IndexedDB
+* نحوهٔ محاسبه و Indexing
+
+دست شما کاملاً باز است.
+
+اگر راهی پیدا کردید که از این Specification بهتر، سریع‌تر، قابل نگهداری‌تر یا حرفه‌ای‌تر است، آن را اجرا کنید.
+
+**اما منطق کسب‌وکار و قوانین داده‌ای زیر نباید بدون دلیل تغییر کنند.**
+
+اگر در موردی راه‌حل بهتری پیدا کردید، آن را پیاده‌سازی کنید و در README یا گزارش نهایی توضیح دهید که چه بهبودی ایجاد کرده‌اید.
+
+---
+
+# 3. محدودیت‌های فنی اصلی
+
+برنامه باید همچنان:
+
+* HTML5
+* CSS3
+* Vanilla JavaScript
+
+باشد.
+
+نباید نیاز داشته باشد به:
+
+* Node.js
+* npm
+* Python
+* Backend
+* Database Server
+* Localhost
+* Internet
+* CDN
+
+برنامه باید با Double Click روی:
+
+`index.html`
+
+قابل اجرا باشد.
+
+تمام وابستگی‌های JavaScript و CSS باید Local باشند.
+
+ساختار فعلی `lib/` حفظ یا در صورت نیاز بهتر شود.
+
+کتابخانه‌های اصلی:
+
+* SheetJS
+* Dexie.js
+
+باید Local باشند.
+
+---
+
+# 4. فلسفه اصلی سیستم
+
+سیستم را صرفاً یک Excel Dashboard در نظر نگیرید.
+
+این برنامه در اصل یک:
+
+> **سیستم مدیریت و ردیابی چرخه عمر رول**
+
+است.
+
+چرخهٔ کلی:
+
+```text
+رول خام
+   ↓
+متالایز
+   ↓
+برش
+   ↓
+رول‌های کوچکتر
+```
+
+و `Archived Rolls` تاریخچهٔ وضعیت‌های قبلی رول‌ها را نگهداری می‌کند.
+
+بنابراین سه مفهوم باید کاملاً از هم تفکیک شوند:
+
+```text
+CURRENT STATE
+وضعیت فعلی رول‌ها
+
+HISTORY
+تاریخچه رول‌ها
+
+SETUP PLAN
+برنامه و ظرفیت ستاپ‌ها
+```
+
+---
+
+# 5. ساختار واقعی حرکت رول‌ها
+
+این نکته بسیار مهم است.
+
+رول خام ابتدا در بخش `rolls` قرار دارد.
+
+مثلاً:
+
+```text
+F3504730451R4
+```
+
+وقتی متالایز می‌شود:
+
+```text
+F3504730451R4M12
+```
+
+رول قبلی:
+
+```text
+F3504730451R4
+```
+
+از بخش فعلی به Archive منتقل می‌شود.
+
+یعنی Archive شامل نسخهٔ قبلی رول است.
+
+سپس اگر:
+
+```text
+F3504730451R4M12
+```
+
+برش بخورد و به دو رول تبدیل شود:
+
+```text
+F3504730451R4M1213R5
+F3504730451R4M1213L4
+```
+
+رول مادر قبل از برش:
+
+```text
+F3504730451R4M12
+```
+
+به Archive منتقل می‌شود.
+
+بنابراین:
+
+> Archive تاریخچهٔ Roll Stateهاست.
+
+Archive نباید به‌صورت ساده «لیست رول‌های متالایز شده» فرض شود.
+
+---
+
+# 6. تشخیص Roll خام
+
+یک Roll خام از فایل:
+
+`rolls.xlsx`
+
+رولی است که:
+
+1. مقدار `نوع فیلم` آن دارای R یا r باشد.
+2. مقدار `شماره پالت` خالی باشد.
+
+بررسی R باید Case-Insensitive باشد.
+
+یعنی:
+
+```javascript
+filmType.includes('R')
+```
+
+یا معادل Case-Insensitive آن.
+
+مقادیر زیر برای شماره پالت «خالی» محسوب می‌شوند:
+
+```text
+null
+undefined
+""
+"   "
+```
+
+اما این‌ها خالی نیستند:
+
+```text
+0
+P0
+0:1
+```
+
+---
+
+# 7. تشخیص Roll خام متالایز شده
+
+از فایل:
+
+`Archived Rolls.xlsx`
+
+تمام رکوردهایی که:
+
+```text
+نوع فیلم دارای R یا r
+```
+
+هستند، به‌عنوان رول‌های خامی در نظر گرفته می‌شوند که از وضعیت خام فعلی عبور کرده‌اند.
+
+در این قسمت **نباید از شماره رول برای استخراج بخش قبل از M استفاده شود.**
+
+این روش اشتباه است و نباید پیاده‌سازی شود.
+
+رکوردهای استخراج‌شده باید بر اساس شماره رول Unique شوند.
+
+مثلاً:
+
+```text
+F3504730451R4
+F3504730452R3
+F3504730451R4
+F3504730453R2
+```
+
+تبدیل شود به:
+
+```text
+F3504730451R4
+F3504730452R3
+F3504730453R2
+```
+
+هر Roll فقط یک بار در شمارش متالایز شده لحاظ شود.
+
+---
+
+# 8. ستون‌های واقعی Excel
+
+در `rolls.xlsx`:
+
+```text
+شماره رول
+عرض رول اولیه
+متراژ
+ضخامت
+نوع فیلم
+شماره پالت
+شماره ستاپ
+```
+
+در `Archived Rolls.xlsx`:
+
+```text
+شماره رول
+عرض
+متراژ اولیه
+ضخامت
+نوع فیلم
+شماره پالت
+شماره ستاپ
+```
+
+این نام‌ها باید در سیستم به‌صورت صحیح Map شوند.
+
+پیشنهاد می‌شود Mapping ستون‌ها در یک لایهٔ Normalize مرکزی انجام شود تا منطق Business Logic به نام‌های خام Excel وابسته نباشد.
+
+---
+
+# 9. Normalization Layer
+
+یک لایهٔ مرکزی برای Normalize کردن داده‌های Excel ایجاد کنید.
+
+برای مثال دادهٔ داخلی سیستم می‌تواند مفهومی شبیه این داشته باشد:
+
+```javascript
+{
+    rollNumber,
+    width,
+    actualLength,
+    thickness,
+    filmType,
+    palletNumber,
+    setupNumber,
+    source
+}
+```
+
+در نتیجه:
+
+```text
+Excel Columns
+      ↓
+Normalization
+      ↓
+Internal Roll Model
+      ↓
+Business Logic
+```
+
+این کار باعث می‌شود اگر در آینده ساختار Excel کمی تغییر کرد، کل سیستم نیاز به بازنویسی نداشته باشد.
+
+---
+
+# 10. Import Engine
+
+Import باید این فرآیند را طی کند:
+
+```text
+File
+ ↓
+Extension Validation
+ ↓
+ArrayBuffer
+ ↓
+SheetJS XLSX.read
+ ↓
+Worksheet Detection
+ ↓
+Header Validation
+ ↓
+Normalization
+ ↓
+Data Validation
+ ↓
+IndexedDB
+ ↓
+Derived Calculations
+ ↓
+UI Refresh
+```
+
+در Browser فایل انتخاب‌شده را به `ArrayBuffer` تبدیل کرده و با SheetJS پردازش کنید.
+
+---
+
+# 11. Import Validation Report
+
+پس از Import فقط پیام «موفق بود» نشان داده نشود.
+
+یک گزارش خلاصه نمایش داده شود.
+
+مثلاً:
+
+```text
+✓ تعداد کل رکوردها: 25,431
+
+✓ رکوردهای معتبر: 25,420
+
+⚠ رکوردهای بدون عرض: 7
+
+⚠ رکوردهای بدون متراژ: 12
+
+⚠ رکوردهای بدون ضخامت: 3
+
+✓ رول خام شناسایی‌شده: 1,842
+```
+
+کاربر باید بتواند خطاهای مهم داده‌ای را مشاهده کند.
+
+---
+
+# 12. Import Metadata
+
+برای هر فایل اطلاعات زیر ذخیره شود:
+
+```text
+نام فایل
+تاریخ Import
+تعداد رکورد
+تعداد رکورد معتبر
+تعداد خطا
+تعداد رول خام
+Hash فایل در صورت امکان
+```
+
+مثلاً:
+
+```text
+rolls.xlsx
+
+آخرین Import:
+1405/06/12 08:42
+
+تعداد رکورد:
+25,431
+
+رول خام:
+1,842
+```
+
+اگر فایل جدید با نسخهٔ قبلی یکسان باشد، سیستم می‌تواند به کاربر هشدار دهد که فایل ظاهراً تغییری نکرده است.
+
+---
+
+# 13. IndexedDB Architecture
+
+دیتابیس Local باید حداقل مفاهیم زیر را پوشش دهد:
+
+```text
+rolls
+archivedRolls
+setupRolls
+standardLengthRules
+appSettings
+importMetadata
+```
+
+در صورت نیاز، برای Performance بهتر می‌توانید Derived Data یا Indexهای بیشتری ایجاد کنید.
+
+اما از ذخیرهٔ اطلاعاتی که به‌راحتی قابل محاسبه مجدد هستند بدون دلیل خودداری کنید.
+
+---
+
+# 14. Transaction Safety
+
+عملیات مهم Database باید Transactional باشند.
+
+به‌خصوص:
+
+* Import
+* Replace Dataset
+* Save Setup
+* Edit Setup
+* تغییر ضخامت گروه
+* Save Standard Rule
+* Delete Rule
+* Backup Restore
+
+در Import حجیم، از Bulk Operations مناسب استفاده کنید.
+
+هدف:
+
+```text
+Either complete successfully
+OR
+rollback / do not leave a half-imported dataset
+```
+
+باشد.
+
+---
+
+# 15. Standard Length Rules
+
+در Settings بخشی برای تعریف قوانین متراژ استاندارد ایجاد کنید.
+
+ساختار Rule:
+
+```text
+Thickness
+Minimum Actual Length
+Maximum Actual Length
+Standard Length
+```
+
+واحد Thickness:
+
+```text
+Micron / میکرون
+```
+
+مثلاً:
+
+```text
+20 | 17000 | 24000 | 20000
+20 | 35000 | 45000 | 40000
+```
+
+یعنی:
+
+```text
+17000 <= ActualLength <= 24000
+→ StandardLength = 20000
+```
+
+و:
+
+```text
+35000 <= ActualLength <= 45000
+→ StandardLength = 40000
+```
+
+---
+
+# 16. Boundary Rules
+
+هر دو مرز بازه شامل هستند.
+
+یعنی:
+
+```text
+17000
+```
+
+و:
+
+```text
+24000
+```
+
+هر دو داخل بازه‌اند.
+
+فرمول:
+
+```text
+minLength <= actualLength && actualLength <= maxLength
+```
+
+---
+
+# 17. No Matching Rule
+
+اگر رول هیچ Ruleای برای ضخامت خودش نداشت:
+
+```text
+standardLength = null
+```
+
+باشد.
+
+این Roll نباید در Match با Setup شرکت کند.
+
+مثلاً:
+
+```text
+Thickness = 20
+ActualLength = 28000
+```
+
+اگر هیچ Ruleای 28000 را پوشش ندهد:
+
+```text
+StandardLength = null
+```
+
+و Match انجام نشود.
+
+---
+
+# 18. جلوگیری از Overlap قوانین
+
+برای یک ضخامت، قوانین نباید با یکدیگر Overlap داشته باشند.
+
+این غیرمجاز است:
+
+```text
+20 | 17000 | 24000 | 20000
+
+20 | 22000 | 30000 | 25000
+```
+
+چون:
+
+```text
+22000–24000
+```
+
+در هر دو Rule قرار دارد.
+
+هنگام Save Rule این موضوع بررسی شود و ذخیره در صورت Overlap متوقف شود.
+
+این کنترل را فقط در UI انجام ندهید؛ منطق Validation باید مرکزی باشد.
+
+---
+
+# 19. Roll Standard Length
+
+هنگام پردازش رول‌ها:
+
+```text
+Thickness
++
+Actual Length
++
+Standard Length Rules
+```
+
+استفاده شود.
+
+هر Roll داخلی باید در صورت امکان:
+
+```text
+standardLength
+```
+
+داشته باشد.
+
+---
+
+# 20. Setup Definition
+
+فرم تعریف Setup باید شامل این موارد باشد:
+
+```text
+شماره ستاپ
+شماره دستگاه
+عرض رول
+ضخامت
+متراژ استاندارد
+تعداد رول
+الگوی برش
+```
+
+---
+
+# 21. Machine Number
+
+شماره دستگاه فقط یکی از این موارد است:
+
+```text
+1
+2
+3
+```
+
+این شماره مربوط به:
+
+> دستگاه تولید متالایز
+
+است.
+
+این شماره **دستگاه برش نیست.**
+
+---
+
+# 22. Thickness Inheritance
+
+کاربر هنگام ایجاد اولین Roll از یک Setup Number، ضخامت را مشخص می‌کند.
+
+مثلاً:
+
+```text
+Setup 140
+Thickness 20
+```
+
+تمام Rollهای بعدی با:
+
+```text
+Setup 140
+```
+
+باید به‌صورت خودکار:
+
+```text
+Thickness 20
+```
+
+داشته باشند.
+
+کاربر نباید بتواند برای رکورد دوم همان Setup Number ضخامت متفاوتی وارد کند.
+
+---
+
+# 23. تغییر Thickness
+
+اگر کاربر Setup را ویرایش کند و ضخامت را تغییر دهد:
+
+مثلاً:
+
+```text
+20 → 25
+```
+
+باید تمام رکوردهای همان Setup Number نیز به:
+
+```text
+25
+```
+
+تغییر کنند.
+
+قبل از انجام این عملیات پیام تأیید نمایش دهید.
+
+مثلاً:
+
+```text
+تغییر ضخامت ستاپ ۱۴۰ باعث تغییر ضخامت ۷ رکورد دیگر نیز خواهد شد.
+آیا ادامه می‌دهید؟
+```
+
+عملیات باید Transactional باشد.
+
+---
+
+# 24. Standard Length در Setup
+
+در فیلد:
+
+```text
+متراژ استاندارد
+```
+
+فقط Standard Lengthهایی که برای Thickness انتخاب‌شده تعریف شده‌اند نمایش داده شوند.
+
+مثلاً اگر:
+
+```text
+Thickness = 20
+```
+
+و Rules:
+
+```text
+20 → 20000
+20 → 40000
+```
+
+هستند، Dropdown فقط:
+
+```text
+20000
+40000
+```
+
+را نشان دهد.
+
+---
+
+# 25. Setup Unique Key
+
+ترکیب زیر باید در تمام Setupها Unique باشد:
+
+```text
+عرض
++
+شماره ستاپ
++
+متراژ استاندارد
++
+شماره دستگاه
+```
+
+مثلاً:
+
+```text
+2120-140-20000-2
+```
+
+نباید دوباره ثبت شود.
+
+اما:
+
+```text
+2120-140-20000-3
+```
+
+مجاز است.
+
+---
+
+# 26. Setup Edit
+
+هر رکورد Setup باید قابلیت:
+
+```text
+Edit
+Delete
+```
+
+داشته باشد.
+
+در Edit تمام Validationهای Create نیز باید مجدداً اجرا شوند.
+
+به‌خصوص:
+
+* Unique Key
+* Thickness
+* Standard Length
+* Cutting Pattern
+* Width
+* Machine
+* Count
+
+---
+
+# 27. Cutting Pattern
+
+کاربر باید بتواند الگوی برش را با `-` وارد کند.
+
+مثلاً:
+
+```text
+1100-1170
+```
+
+یا:
+
+```text
+600-600-600-600
+```
+
+برای عرض مادر:
+
+```text
+2270
+```
+
+مثال اول:
+
+```text
+1100 + 1170 = 2270
+```
+
+مثال دوم:
+
+```text
+600 + 600 + 600 + 600 = 2400
+```
+
+---
+
+# 28. Cutting Pattern Validation
+
+هر بخش باید عدد معتبر باشد.
+
+مثلاً:
+
+```text
+1100-1170
+```
+
+به:
+
+```text
+[1100, 1170]
+```
+
+تبدیل شود.
+
+سپس:
+
+```text
+sum(patternWidths)
+```
+
+محاسبه شود.
+
+قانون:
+
+```text
+PatternSum <= MotherWidth
+```
+
+اگر:
+
+```text
+PatternSum > MotherWidth
+```
+
+ثبت ممنوع شود.
+
+اما اگر کمتر باشد، کاملاً مجاز است.
+
+مثلاً:
+
+```text
+MotherWidth = 2270
+
+Pattern:
+1100-1100
+
+Sum = 2200
+
+Remaining = 70
+
+✓ معتبر
+```
+
+---
+
+# 29. Cutting Pattern UX
+
+در هنگام تایپ ترجیحاً نتیجهٔ زنده نمایش داده شود:
+
+```text
+عرض مادر: 2270
+
+الگوی برش:
+1100 - 1170
+
+مجموع:
+2270
+
+باقی‌مانده:
+0
+
+✓ الگو معتبر است
+```
+
+اگر کمتر:
+
+```text
+مجموع: 2200
+باقی‌مانده: 70
+✓ معتبر
+```
+
+اگر بیشتر:
+
+```text
+مجموع: 2400
+اضافه‌عرض: 130
+✕ الگوی برش نامعتبر
+```
+
+---
+
+# 30. Cutting Pattern Cards
+
+در جدول Setupها، الگوی برش نباید صرفاً به شکل متن خام نمایش داده شود.
+
+برای:
+
+```text
+1100-1170
+```
+
+دو Card زیبا:
+
+```text
+┌──────┐  ┌──────┐
+│ 1100 │  │ 1170 │
+└──────┘  └──────┘
+```
+
+و برای:
+
+```text
+600-600-600-600
+```
+
+چهار Card.
+
+در کنار یا پایین آن:
+
+```text
+مجموع: 2400
+```
+
+و در صورت کمتر بودن:
+
+```text
+پرت عرض: ...
+```
+
+نمایش داده شود.
+
+---
+
+# 31. Raw Rolls Page
+
+صفحه‌ای جدید ایجاد شود:
+
+```text
+رول‌ها
+```
+
+این صفحه دارای دو Tab باشد:
+
+```text
+رول‌های خام
+رول‌های برش‌خورده
+```
+
+### نکته مهم:
+
+تب «رول‌های برش‌خورده» فعلاً فقط از نظر معماری و لینک‌پذیری آماده باشد.
+
+**جزئیات UI و منطق کامل آن در این مرحله طراحی نشود.**
+
+اما سیستم باید از ابتدا به‌گونه‌ای طراحی شود که:
+
+```text
+Raw Roll
+↔
+Metallized Roll
+↔
+Cut Roll
+```
+
+قابل Link شدن باشد.
+
+---
+
+# 32. Raw Rolls Detection
+
+رول خام موجود از:
+
+`rolls.xlsx`
+
+با این شروط:
+
+```text
+filmType contains R/r
+AND
+palletNumber is empty
+```
+
+شناسایی شود.
+
+---
+
+# 33. Raw Rolls Grouping
+
+تمام رول‌های خام باید بر اساس ترکیب Unique زیر Group شوند:
+
+```text
+عرض
++
+متراژ استاندارد
++
+شماره ستاپ
+```
+
+مثلاً:
+
+```text
+2120-20000-140
+```
+
+یک Group است.
+
+اگر ۱۸ رول چنین ترکیبی داشته باشند:
+
+```text
+Count = 18
+```
+
+باشد.
+
+---
+
+# 34. Raw Rolls Table
+
+جدول حداقل شامل:
+
+```text
+عرض
+متراژ استاندارد
+شماره ستاپ
+تعداد
+```
+
+باشد.
+
+می‌توانید ستون‌های مفید دیگری نیز اضافه کنید، مشروط بر اینکه UI بیش از حد شلوغ نشود.
+
+---
+
+# 35. Raw Rolls Matching Status
+
+پیشنهاد می‌شود یک ستون وضعیت نیز وجود داشته باشد.
+
+مثلاً:
+
+```text
+✓ دارای Setup
+⚠ بدون Setup
+```
+
+تا ترکیب‌هایی که برایشان Setup تعریف نشده است سریع مشخص شوند.
+
+---
+
+# 36. Advanced Sorting
+
+صفحهٔ Raw Rolls باید Sorting چندمرحله‌ای داشته باشد.
+
+کاربر بتواند فیلدهایی مانند:
+
+```text
+عرض
+شماره ستاپ
+متراژ استاندارد
+```
+
+را به Sort Pipeline اضافه کند.
+
+مثلاً:
+
+```text
+1. شماره ستاپ ↑
+2. عرض ↓
+3. متراژ استاندارد ↑
+```
+
+اولویت Sort با ترتیب نمایش مشخص شود.
+
+---
+
+# 37. Drag & Drop Sorting
+
+کاربر باید بتواند ترتیب فیلدهای Sort را جابه‌جا کند.
+
+مثلاً:
+
+```text
+[ شماره ستاپ ↑ ]
+[ عرض ↓ ]
+[ متراژ استاندارد ↑ ]
+```
+
+را به:
+
+```text
+[ عرض ↓ ]
+[ شماره ستاپ ↑ ]
+[ متراژ استاندارد ↑ ]
+```
+
+تغییر دهد.
+
+لیست باید بلافاصله بر اساس ترتیب جدید Sort شود.
+
+---
+
+# 38. Persistent Sorting
+
+تنظیمات Sort باید بعد از خروج و ورود مجدد باقی بمانند.
+
+مثلاً ساختاری مشابه:
+
+```javascript
+[
+    {
+        field: "setupNumber",
+        direction: "asc"
+    },
+    {
+        field: "width",
+        direction: "desc"
+    },
+    {
+        field: "standardLength",
+        direction: "asc"
+    }
+]
+```
+
+ذخیره شود.
+
+محل ذخیره می‌تواند IndexedDB یا روش مناسب دیگری باشد.
+
+---
+
+# 39. Matching Engine
+
+یک Matching Engine مرکزی ایجاد کنید.
+
+این Engine نباید در UI پراکنده باشد.
+
+منطق باید چیزی شبیه این باشد:
+
+```text
+Excel Data
++
+Standard Rules
++
+Setup Data
+        ↓
+Matching Engine
+        ↓
+Calculated Production State
+```
+
+صفحات مختلف باید از همین Engine استفاده کنند.
+
+---
+
+# 40. Raw Roll Match Key
+
+برای رول‌های خام موجود:
+
+```text
+عرض
++
+متراژ استاندارد
++
+شماره ستاپ
+```
+
+کلید:
+
+```text
+Width-StandardLength-SetupNumber
+```
+
+مثلاً:
+
+```text
+2120-20000-140
+```
+
+است.
+
+---
+
+# 41. Metallized Match Key
+
+برای رول‌های خام متالایز شده از Archive:
+
+کلید فقط:
+
+```text
+عرض
++
+شماره ستاپ
+```
+
+است.
+
+مثلاً:
+
+```text
+2120-140
+```
+
+است.
+
+این دو Match Key عمداً متفاوت هستند.
+
+---
+
+# 42. Metallized Allocation
+
+این قسمت بسیار مهم است.
+
+فرض کنید Setupها:
+
+```text
+Width = 2120
+Setup = 140
+```
+
+هستند.
+
+و:
+
+```text
+Machine 1 → Count 5
+Machine 2 → Count 8
+```
+
+هر دو رکورد کلید:
+
+```text
+2120-140
+```
+
+دارند.
+
+اگر ۹ Roll متالایز شده برای این کلید پیدا شود، نباید برای هر دو رکورد ۹ ثبت شود.
+
+بلکه:
+
+```text
+Machine 1 → 5
+Machine 2 → 4
+```
+
+باشد.
+
+مجموع:
+
+```text
+9
+```
+
+---
+
+# 43. Allocation Algorithm
+
+برای هر گروه:
+
+```text
+Width + SetupNumber
+```
+
+تمام Setupهای دارای این کلید را پیدا کنید.
+
+سپس آن‌ها را بر اساس:
+
+```text
+Setup Count ASC
+```
+
+مرتب کنید.
+
+مثلاً:
+
+```text
+Machine 2 → 4
+Machine 3 → 7
+Machine 1 → 10
+```
+
+اگر ۱۵ Roll متالایز شده داشته باشیم:
+
+```text
+Machine 2 → 4
+Machine 3 → 7
+Machine 1 → 4
+```
+
+شود.
+
+هر Roll فقط یک بار تخصیص داده شود.
+
+---
+
+# 44. Allocation Capacity Rule
+
+برای هر Setup:
+
+```text
+AllocatedMetallized <= SetupCount
+```
+
+باشد.
+
+اگر تعداد متالایزها بیشتر از مجموع ظرفیت تمام Setupهای دارای آن کلید باشد، مازاد نباید به‌صورت مصنوعی تخصیص داده شود.
+
+مثلاً:
+
+```text
+Machine 1 = 5
+Machine 2 = 8
+```
+
+ظرفیت کل:
+
+```text
+13
+```
+
+اگر ۱۸ Roll وجود داشته باشد:
+
+```text
+Machine 1 → 5
+Machine 2 → 8
+Unallocated → 5
+```
+
+و سیستم باید این مغایرت را به کاربر نشان دهد.
+
+---
+
+# 45. Auditability
+
+کاربر نباید فقط عدد نهایی را ببیند.
+
+برای Allocation یک Tooltip یا جزئیات قابل مشاهده داشته باشید.
+
+مثلاً:
+
+```text
+۹ رول متالایز شده برای کلید 2120-140 شناسایی شد.
+
+۵ رول به دستگاه ۱ تخصیص یافت.
+۴ رول به دستگاه ۲ تخصیص یافت.
+```
+
+این قابلیت برای Audit بسیار مهم است.
+
+---
+
+# 46. Setup Report
+
+برای هر Setup باید این اطلاعات محاسبه شود:
+
+```text
+تعداد رول خام موجود
+تعداد رول خام متالایز شده
+تعداد رول در Setup
+تعداد رول خام برش‌نشده
+```
+
+---
+
+# 47. Raw Rolls Existing Count
+
+برای هر Setup:
+
+```text
+RawExistingCount
+```
+
+بر اساس Match سه‌فاکتوری:
+
+```text
+Width
++
+StandardLength
++
+SetupNumber
+```
+
+محاسبه شود.
+
+مثلاً:
+
+```text
+Setup:
+2120 / 20000 / 140
+
+Raw Rolls:
+18
+
+→ RawExisting = 18
+```
+
+---
+
+# 48. Metallized Count
+
+از:
+
+```text
+Archived Rolls
+```
+
+رکوردهای دارای R/r را استخراج کنید.
+
+سپس Roll Numberها Unique شوند.
+
+بعد Match دو‌فاکتوری:
+
+```text
+Width
++
+SetupNumber
+```
+
+انجام شود.
+
+در صورت وجود چند Machine برای یک کلید، Allocation Algorithm بخش 43 اعمال شود.
+
+---
+
+# 49. Setup Count
+
+این عدد دقیقاً همان عددی است که کاربر برای:
+
+```text
+تعداد رول
+```
+
+وارد کرده است.
+
+مثلاً:
+
+```text
+Count = 20
+```
+
+هیچ محاسبهٔ دیگری برای آن انجام نشود.
+
+---
+
+# 50. Uncut Rolls
+
+فرمول اصلی:
+
+```text
+Uncut =
+SetupCount
+-
+(
+RawExisting
++
+Metallized
+)
+```
+
+مثلاً:
+
+```text
+Setup = 12
+Raw = 3
+Metallized = 6
+```
+
+نتیجه:
+
+```text
+12 - (3 + 6) = 3
+```
+
+---
+
+# 51. Negative Uncut
+
+اگر:
+
+```text
+Raw + Metallized > SetupCount
+```
+
+باشد، مقدار منفی از نظر فیزیکی «رول منفی» نیست.
+
+پیشنهاد UX:
+
+```text
+Uncut = max(0, calculatedUncut)
+```
+
+اما مغایرت نباید پنهان شود.
+
+مثلاً:
+
+```text
+برش‌نشده: 0
+
+⚠ مغایرت:
+۲ رول بیشتر از ظرفیت Setup شناسایی شده است.
+```
+
+اگر روش فنی بهتری دارید، می‌توانید آن را اجرا کنید، اما مفهوم مهم این است که **مغایرت داده باید قابل مشاهده باشد.**
+
+---
+
+# 52. Data Quality / Alerts
+
+یک سیستم هشدار مرکزی پیشنهاد می‌شود.
+
+مواردی مانند:
+
+```text
+⚠ Roll بدون Setup
+⚠ Rule بدون پوشش
+⚠ Overlap در Rules
+⚠ Setup Duplicate
+⚠ Pattern بزرگ‌تر از Width
+⚠ Metallized Allocation مازاد
+⚠ Uncut منفی
+⚠ داده بدون Width
+⚠ داده بدون Thickness
+⚠ داده بدون Length
+```
+
+را شناسایی کنید.
+
+---
+
+# 53. Calculation Engine
+
+تمام محاسبات باید در یک Engine مرکزی باشند.
+
+مثلاً معماری مفهومی:
+
+```text
+calculateProductionState()
+```
+
+خروجی مفهومی:
+
+```javascript
+{
+    rawRollGroups,
+    metallizedRollGroups,
+    setupReport,
+    warnings,
+    summary
+}
+```
+
+UI نباید خودش منطق اصلی را محاسبه کند.
+
+---
+
+# 54. Derived State
+
+روند محاسبات پیشنهادی:
+
+```text
+Raw Excel
+    ↓
+Normalize
+    ↓
+Standard Length Calculation
+    ↓
+Raw Groups
+    ↓
+Archived Unique Raw Rolls
+    ↓
+Setup Matching
+    ↓
+Metallized Allocation
+    ↓
+Setup Report
+    ↓
+Dashboard / Tables / Reports
+```
+
+---
+
+# 55. Recalculation
+
+هر زمان یکی از موارد زیر تغییر کرد:
+
+```text
+rolls.xlsx
+Archived Rolls.xlsx
+Setup
+Standard Length Rule
+Thickness
+```
+
+محاسبات وابسته باید Refresh شوند.
+
+از محاسبهٔ غیرضروری کل Dataset در هر تغییر UI خودداری کنید.
+
+در صورت نیاز Cache یا Incremental Recalculation ایجاد کنید.
+
+---
+
+# 56. Performance
+
+ممکن است Excel شامل ده‌ها هزار یا حتی صدها هزار رکورد باشد.
+
+بنابراین:
+
+* از Loopهای تکراری غیرضروری خودداری کنید.
+* Grouping را با Map انجام دهید.
+* Unique را با Set انجام دهید.
+* از Bulk Database Operations استفاده کنید.
+* دادهٔ خام را چندین بار از IndexedDB نخوانید.
+* در صورت نیاز Derived Data را Cache کنید.
+* Render جدول‌های بزرگ را بهینه کنید.
+
+در صورت نیاز Pagination، Virtual Rendering یا محدودسازی Render DOM را پیشنهاد و پیاده‌سازی کنید.
+
+---
+
+# 57. Dashboard
+
+Dashboard فعلی باید حفظ شود اما منطق آن بازطراحی شود تا از Calculation Engine مرکزی تغذیه کند.
+
+KPIهای اصلی:
+
+```text
+رول‌های خام
+رول‌های متالایز شده
+کل رول‌های Setup
+رول‌های برش‌نشده
+```
+
+اما مقادیر باید مطابق منطق جدید باشند.
+
+---
+
+# 58. Dashboard Raw KPI
+
+در Dashboard «رول‌های خام» نباید صرفاً هر رکورد R را بشمارد.
+
+طبق منطق نهایی:
+
+رول خام فعلی:
+
+```text
+rolls.xlsx
+filmType R/r
+pallet empty
+```
+
+است.
+
+اگر KPI صرفاً برای تعداد Roll خام فعلی استفاده می‌شود، همین منطق اعمال شود.
+
+اگر UI نیاز به تفکیک «کل R» و «خام واقعی» دارد، می‌توانید KPI/جزئیات جداگانه ارائه کنید.
+
+---
+
+# 59. Dashboard Metallized KPI
+
+برای تعداد رول‌های متالایز شده نیز از:
+
+```text
+Archived Rolls
+R/r
+Unique Roll Number
+```
+
+استفاده شود.
+
+از شمارش خام تمام Archive Rows خودداری شود.
+
+---
+
+# 60. Import and Data Versioning
+
+در صورت امکان، Dataset Version ایجاد کنید.
+
+مثلاً:
+
+```text
+Dataset #12
+
+rolls.xlsx
+Imported: ...
+Records: ...
+
+Archived Rolls.xlsx
+Imported: ...
+Records: ...
+```
+
+این امر در آینده برای Traceability بسیار مفید است.
+
+---
+
+# 61. Backup / Restore
+
+یک قابلیت بسیار مهم اضافه کنید:
+
+```text
+Export Backup
+Import Backup
+```
+
+Backup باید بتواند اطلاعات مهم برنامه را ذخیره کند:
+
+```text
+Setup Rolls
+Standard Rules
+Settings
+Sort Settings
+Metadata
+```
+
+و در صورت امکان Datasetهای Import شده را نیز پوشش دهد.
+
+فایل نمونه:
+
+```text
+RollMonitor-Backup-1405-06-12.json
+```
+
+Restore باید با Validation و Confirmation انجام شود.
+
+---
+
+# 62. Backup Warning
+
+در Settings یک توضیح واضح:
+
+> اطلاعات این برنامه به‌صورت Local در مرورگر ذخیره می‌شود. برای جلوگیری از از دست رفتن اطلاعات، به‌صورت دوره‌ای Backup تهیه کنید.
+
+---
+
+# 63. App Settings
+
+Settings می‌تواند شامل:
+
+```text
+Standard Length Rules
+Backup / Restore
+Data Management
+Import Information
+Sorting Defaults
+```
+
+باشد.
+
+در صورت نیاز امکانات بیشتری اضافه کنید.
+
+---
+
+# 64. Roll Traceability
+
+معماری سیستم باید از ابتدا امکان Traceability را فراهم کند.
+
+مثلاً:
+
+```text
+F3504730451R4
+        ↓
+F3504730451R4M12
+        ↓
+F3504730451R4M1213R5
+F3504730451R4M1213L4
+```
+
+هر Roll جدید باید در صورت امکان ارتباط خود را با Roll قبلی/مادر حفظ کند.
+
+---
+
+# 65. Roll Genealogy
+
+در آینده سیستم باید بتواند چیزی شبیه این را نشان دهد:
+
+```text
+Raw Roll
+F3504730451R4
+       │
+       ▼
+Metallized Roll
+F3504730451R4M12
+       │
+       ├── Cut Roll
+       │   F3504730451R4M1213R5
+       │
+       └── Cut Roll
+           F3504730451R4M1213L4
+```
+
+در این مرحله UI کامل تب Cut Rolls لازم نیست.
+
+اما Database Model و Architecture باید برای آن آماده باشد.
+
+---
+
+# 66. Timeline
+
+در آینده امکان نمایش Timeline یک Roll وجود داشته باشد:
+
+```text
+01/06
+رول خام
+
+02/06
+متالایز
+دستگاه 2
+
+03/06
+برش
+دستگاه 3
+```
+
+این قابلیت را در Architecture در نظر بگیرید.
+
+---
+
+# 67. Data Lineage
+
+در آینده بتوانیم بفهمیم:
+
+```text
+این Roll از کدام Roll مادر آمده؟
+```
+
+و:
+
+```text
+این Roll مادر به چه Rollهایی تبدیل شده؟
+```
+
+این موضوع باید در مدل داده قابل پشتیبانی باشد.
+
+---
+
+# 68. UI/UX
+
+UI فعلی Dark Industrial است.
+
+اصل کلی را حفظ کنید مگر اینکه طراحی بهتری ارائه دهید.
+
+RTL کامل باشد.
+
+فونت فارسی Local حفظ شود.
+
+رابط باید:
+
+* Responsive
+* Professional
+* Industrial
+* Clean
+* Fast
+* Accessible
+
+باشد.
+
+---
+
+# 69. Validation UX
+
+خطاها ترجیحاً فقط با Toast نشان داده نشوند.
+
+برای خطاهای Field-Level:
+
+```text
+فیلد دارای Border قرمز
+پیام خطا زیر Field
+Focus روی Field
+```
+
+مثلاً:
+
+```text
+الگوی برش:
+
+1200-1200
+
+✕ مجموع عرض الگوی برش (2400)
+بیشتر از عرض رول مادر (2270) است.
+```
+
+---
+
+# 70. Confirmation UX
+
+عملیات خطرناک:
+
+```text
+Delete
+Bulk Delete
+Change Thickness for Setup
+Restore Backup
+Replace Excel Dataset
+```
+
+باید Confirmation داشته باشند.
+
+---
+
+# 71. Accessibility
+
+موارد زیر رعایت شود:
+
+* Keyboard Navigation
+* Focus State
+* aria-label
+* aria-selected
+* semantic HTML
+* قابل استفاده بودن Tabها با Keyboard
+* Contrast مناسب
+
+---
+
+# 72. Error Handling
+
+هیچ خطای JavaScript نباید باعث شود برنامه بدون پیام مناسب از کار بیفتد.
+
+خطاهای مهم:
+
+```text
+IndexedDB unavailable
+Invalid Excel
+Missing Sheet
+Missing Columns
+Invalid Number
+Invalid Pattern
+Duplicate Setup
+Invalid Rule
+Backup Corrupted
+```
+
+باید مدیریت شوند.
+
+---
+
+# 73. Security
+
+چون برنامه کاملاً Local است:
+
+* داده نباید به Server ارسال شود.
+* CDN استفاده نشود.
+* Fetch غیرضروری به اینترنت انجام نشود.
+* اطلاعات Excel در Console به‌صورت غیرضروری چاپ نشود.
+* HTMLهای ساخته‌شده از دادهٔ Excel حتماً Escape شوند.
+
+---
+
+# 74. Offline Verification
+
+برنامه را در شرایط زیر تست کنید:
+
+```text
+Internet ON
+Internet OFF
+```
+
+در هر دو حالت باید کار کند.
+
+همچنین:
+
+```text
+Double Click index.html
+```
+
+باید کافی باشد.
+
+---
+
+# 75. مهم: وابستگی‌ها
+
+هیچ Dependency جدیدی بدون ضرورت اضافه نکنید.
+
+اگر برای یک قابلیت کتابخانه‌ای پیشنهاد می‌دهید، ابتدا بررسی کنید آیا Vanilla JS فعلی بهتر نیست.
+
+هدف:
+
+```text
+Zero Installation
+Zero Server
+Zero CDN
+```
+
+است.
+
+---
+
+# 76. Database Migration
+
+چون پروژه فعلی IndexedDB دارد، احتمالاً Schema فعلی Version 1 است.
+
+در نسخهٔ جدید، Schema را با Migration صحیح ارتقا دهید.
+
+اطلاعات قبلی کاربر نباید بدون دلیل از بین برود.
+
+مثلاً:
+
+```text
+DB Version 1
+     ↓
+DB Version 2
+     ↓
+DB Version 3
+```
+
+هر Migration باید امن باشد.
+
+---
+
+# 77. Current Project Compatibility
+
+پروژه فعلی قبلاً دارای این ساختار منطقی است:
+
+```text
+rolls
+archivedRolls
+setupRolls
+meta
+```
+
+و UI فعلی شامل Dashboard، Import و Setup است.
+
+این ساختار را بررسی کنید و در صورت مناسب بودن توسعه دهید.
+
+اما اگر برای Requirements جدید نیاز به Refactor است، Refactor اصولی انجام دهید.
+
+---
+
+# 78. Code Architecture
+
+پیشنهاد می‌شود JavaScript از نظر منطقی به بخش‌هایی مشابه این تقسیم شود:
+
+```text
+config
+database
+excel-import
+normalization
+rules-engine
+setup-engine
+matching-engine
+allocation-engine
+calculation-engine
+validation
+ui
+dashboard
+raw-rolls
+settings
+backup
+utilities
+```
+
+لازم نیست حتماً همین نام فایل‌ها را استفاده کنید.
+
+اگر ساختار بهتری دارید، اجرا کنید.
+
+---
+
+# 79. Single Source of Truth
+
+نباید یک محاسبه در Dashboard و محاسبه‌ای دیگر در Setup Table وجود داشته باشد.
+
+همه باید از Calculation Engine استفاده کنند.
+
+مثلاً:
+
+```text
+Calculation Engine
+       ↓
+Dashboard
+       ↓
+Setup Report
+       ↓
+Raw Roll Page
+       ↓
+Future Cut Roll Page
+```
+
+---
+
+# 80. Example End-to-End
+
+فرض کنید:
+
+### Rules
+
+```text
+Thickness 20
+
+17000–24000 → 20000
+35000–45000 → 40000
+```
+
+### Setup
+
+```text
+Width = 2120
+Setup = 140
+Machine = 1
+Thickness = 20
+Standard Length = 20000
+Count = 5
+Pattern = 1060-1060
+```
+
+و:
+
+```text
+Width = 2120
+Setup = 140
+Machine = 2
+Thickness = 20
+Standard Length = 20000
+Count = 8
+Pattern = 1060-1060
+```
+
+---
+
+# 81. Example Raw Rolls
+
+در `rolls.xlsx`:
+
+```text
+2120 | 19850 | Thickness 20 | Setup 140 | R
+2120 | 20100 | Thickness 20 | Setup 140 | R
+2120 | 22000 | Thickness 20 | Setup 140 | R
+...
+```
+
+Rule باعث می‌شود:
+
+```text
+19850 → 20000
+20100 → 20000
+22000 → 20000
+```
+
+بنابراین همه در Group:
+
+```text
+2120-20000-140
+```
+
+قرار می‌گیرند.
+
+---
+
+# 82. Example Raw Existing
+
+فرض کنید 3 Roll خام فعلی پیدا شود:
+
+```text
+2120-20000-140 → Count 3
+```
+
+پس:
+
+```text
+RawExisting = 3
+```
+
+---
+
+# 83. Example Metallized
+
+در Archive:
+
+```text
+F3504730451R4
+F3504730452R4
+F3504730451R4
+...
+```
+
+بعد Unique:
+
+```text
+F3504730451R4
+F3504730452R4
+...
+```
+
+فرض کنید 6 Roll برای:
+
+```text
+2120-140
+```
+
+پیدا شود.
+
+---
+
+# 84. Metallized Allocation Example
+
+Setup capacities:
+
+```text
+Machine 1 = 5
+Machine 2 = 8
+```
+
+Metallized:
+
+```text
+6
+```
+
+Allocation:
+
+```text
+Machine 1 → 5
+Machine 2 → 1
+```
+
+---
+
+# 85. Final Setup Report Example
+
+Machine 1:
+
+```text
+Setup Count = 5
+Raw Existing = 3
+Metallized = 5
+Uncut = 0
+```
+
+اما چون:
+
+```text
+3 + 5 = 8
+```
+
+و ظرفیت فقط 5 است، سیستم باید:
+
+```text
+⚠ Data Conflict
+```
+
+را نمایش دهد.
+
+این بسیار مهم است.
+
+---
+
+# 86. اصلاح Example Above
+
+در چنین وضعیتی نباید صرفاً عدد منفی تولید کنیم.
+
+مثلاً:
+
+```text
+Calculated Uncut = -3
+```
+
+سیستم باید آن را به‌عنوان:
+
+```text
+Capacity Conflict = 3
+```
+
+شناخته و گزارش کند.
+
+و مقدار قابل نمایش:
+
+```text
+Uncut = 0
+```
+
+باشد.
+
+---
+
+# 87. پیشنهاد برای گزارش مغایرت
+
+مثلاً:
+
+```text
+Setup 140 / Machine 1
+
+تعداد Setup: 5
+خام موجود: 3
+متالایز شده: 5
+
+⚠ مغایرت ظرفیت: 3
+رول
+```
+
+---
+
+# 88. مهم: Raw Existing و Metallized نباید دوباره یکدیگر را بشمارند
+
+این دو مفهوم از دو منبع و دو وضعیت متفاوت می‌آیند:
+
+```text
+Raw Existing
+=
+Current Rolls + R/r + Empty Pallet
+```
+
+در حالی که:
+
+```text
+Metallized
+=
+Archived + R/r + Unique
+```
+
+هرکدام منطق خودشان را دارند.
+
+---
+
+# 89. Import Replace Policy
+
+هنگام Import فایل جدید، رفتار مشخصی داشته باشید.
+
+پیشنهاد:
+
+```text
+Import rolls.xlsx
+```
+
+به‌عنوان جایگزینی Dataset قبلی همان جدول باشد، نه Append بی‌نهایت.
+
+اما قبل از Replace:
+
+```text
+تعداد رکورد فعلی
+تعداد رکورد جدید
+```
+
+نمایش داده شود.
+
+---
+
+# 90. Raw Roll Page Dynamic Update
+
+اگر کاربر:
+
+```text
+Setup جدید
+```
+
+ثبت کند، Raw Roll Page باید بدون Refresh مرورگر Update شود.
+
+اگر Rule متراژ تغییر کند، Grouping رول‌های خام نیز باید Update شود.
+
+اگر Excel دوباره Import شود، همهٔ محاسبات Update شوند.
+
+---
+
+# 91. Setup Page Dynamic Update
+
+اگر:
+
+```text
+Setup Count
+```
+
+ویرایش شود:
+
+```text
+Dashboard
+Setup Report
+Uncut
+Allocation
+```
+
+باید به‌روزرسانی شوند.
+
+---
+
+# 92. No Hardcoded Business Data
+
+هیچ Rule مربوط به:
+
+```text
+Thickness
+Standard Length
+Machine
+Width
+Setup
+```
+
+را Hardcode نکنید.
+
+همه باید از Database یا User Input بیایند.
+
+---
+
+# 93. No Hardcoded Excel Data
+
+هیچ Roll Number یا مقدار واقعی Excel را در JavaScript Hardcode نکنید.
+
+---
+
+# 94. Numeric Normalization
+
+در خواندن Excel باید اعداد با دقت Normalize شوند.
+
+مواردی مانند:
+
+```text
+20
+"20"
+"۲۰"
+"20,000"
+"۲۰٬۰۰۰"
+```
+
+در صورت امکان صحیح Parse شوند.
+
+اگر مقدار واقعاً نامعتبر است، خطا ثبت شود.
+
+---
+
+# 95. Persian/Latin Digits
+
+برای ورودی‌های عددی کاربر ترجیحاً ارقام فارسی و انگلیسی هر دو پذیرفته شوند.
+
+مثلاً:
+
+```text
+۲۱۲۰
+```
+
+و:
+
+```text
+2120
+```
+
+هر دو باید به:
+
+```text
+2120
+```
+
+Normalize شوند.
+
+---
+
+# 96. Setup Number
+
+Setup Number را به‌عنوان مقدار عددی منطقی در نظر بگیرید، اما در صورت نیاز برای نمایش String Format مناسب داشته باشید.
+
+---
+
+# 97. Roll Number
+
+Roll Number باید به‌عنوان String نگهداری شود.
+
+هرگز آن را به Number تبدیل نکنید.
+
+مثلاً:
+
+```text
+F3504730451R4M12
+```
+
+کاملاً String است.
+
+---
+
+# 98. آیندهٔ Cut Roll Linking
+
+حتی اگر تب Cut Rolls اکنون کامل نمی‌شود، طراحی Database باید اجازه دهد:
+
+```text
+parentRollNumber
+sourceRollNumber
+previousRollNumber
+```
+
+یا ساختار معادل مناسب را در آینده اضافه کنیم.
+
+اما از حدس زدن Business Logic مربوط به Cut Rolls خودداری کنید.
+
+---
+
+# 99. Documentation
+
+README پروژه را به‌روزرسانی کنید و شامل موارد زیر باشد:
+
+```text
+Project Overview
+Offline Architecture
+Database Schema
+Excel Column Mapping
+Business Rules
+Setup Logic
+Matching Logic
+Metallized Allocation
+Standard Length Rules
+Backup / Restore
+How to Run
+How to Update Local Libraries
+```
+
+---
+
+# 100. Testing
+
+قبل از تحویل، تست‌های منطقی برای موارد زیر ایجاد و اجرا کنید:
+
+### R/r
+
+```text
+R → قبول
+r → قبول
+X → رد
+```
+
+### Pallet
+
+```text
+null → خالی
+undefined → خالی
+"" → خالی
+"   " → خالی
+
+0 → غیرخالی
+P0 → غیرخالی
+0:1 → غیرخالی
+```
+
+### Standard Length
+
+```text
+17000 → داخل
+24000 → داخل
+16999 → خارج
+24001 → خارج
+```
+
+### Pattern
+
+```text
+1100-1170 / 2270 → valid
+1100-1100 / 2270 → valid
+1200-1200 / 2270 → invalid
+```
+
+### Unique Setup
+
+```text
+2120-140-20000-1
+2120-140-20000-1
+→ duplicate
+
+2120-140-20000-2
+→ valid
+```
+
+### Allocation
+
+```text
+Capacity:
+5 + 8
+
+Metallized:
+9
+
+Result:
+5 + 4
+```
+
+### No Rule
+
+```text
+ActualLength = 28000
+No matching Rule
+→ StandardLength = null
+→ No Match
+```
+
+---
+
+# 101. Test Scenario چند دستگاه
+
+حتماً این سناریو را تست کنید:
+
+```text
+Setup 140
+Width 2120
+
+Machine 1 → Count 5
+Machine 2 → Count 8
+Machine 3 → Count 7
+```
+
+و:
+
+```text
+Metallized = 15
+```
+
+نتیجه باید با Allocation ظرفیت‌محور محاسبه شود.
+
+رول‌ها نباید در بیش از یک Setup مصرف شوند.
+
+---
+
+# 102. Performance Test
+
+حداقل Datasetهای آزمایشی:
+
+```text
+1,000 rows
+10,000 rows
+50,000 rows
+100,000+ rows
+```
+
+را تست کنید.
+
+زمان Import و Recalculation را بررسی کنید.
+
+---
+
+# 103. Final Quality Requirement
+
+در پایان پروژه باید این ویژگی‌ها همزمان برقرار باشند:
+
+```text
+✓ Fully Offline
+✓ Double-click execution
+✓ No Server
+✓ No CDN
+✓ IndexedDB
+✓ Excel Import
+✓ Standard Length Engine
+✓ Setup Management
+✓ Cutting Pattern Validation
+✓ Setup Unique Constraint
+✓ Thickness Inheritance
+✓ Setup Editing
+✓ Raw Roll Grouping
+✓ Advanced Sorting
+✓ Persistent Sorting
+✓ Raw/Setup Matching
+✓ Metallized Allocation
+✓ No Double Counting
+✓ Uncut Calculation
+✓ Data Quality Alerts
+✓ Backup / Restore
+✓ Auditability
+✓ Future Roll Traceability
+✓ Responsive RTL UI
+```
+
+---
+
+# 104. مهم‌ترین اصل پیاده‌سازی
+
+در تمام پروژه این اصل را حفظ کنید:
+
+```text
+Raw Data
+    ≠
+Derived Data
+    ≠
+Business Rules
+    ≠
+UI
+```
+
+این چهار لایه باید تا حد امکان از یکدیگر جدا باشند.
+
+---
+
+# 105. اصل Single Source of Truth
+
+اگر یک عدد در چند صفحه نمایش داده می‌شود، همه باید از یک Calculation Engine دریافتش کنند.
+
+مثلاً:
+
+```text
+Setup Report
+Dashboard
+Raw Rolls
+Future Reports
+```
+
+نباید هرکدام منطق محاسباتی جدا داشته باشند.
+
+---
+
+# 106. پیشنهادهای ابتکاری
+
+موارد زیر را به‌عنوان پیشنهاد معماری/UX در نظر بگیرید و اگر راه بهتری دارید، آزادانه بهبود دهید:
+
+### A — Calculation Audit
+
+روی هر عدد امکان مشاهدهٔ علت محاسبه وجود داشته باشد.
+
+### B — Data Quality Center
+
+یک مرکز هشدار برای تمام مغایرت‌ها.
+
+### C — Import History
+
+نمایش آخرین Importها.
+
+### D — Backup / Restore
+
+برای جلوگیری از Data Loss.
+
+### E — Roll Timeline
+
+برای Traceability آینده.
+
+### F — Roll Genealogy
+
+ارتباط Roll مادر و فرزند.
+
+### G — Incremental Recalculation
+
+برای Performance بهتر.
+
+### H — Smart Validation
+
+Validation در لحظهٔ ورود داده.
+
+### I — Capacity Conflict Detection
+
+تشخیص:
+
+```text
+Raw + Metallized > Setup Count
+```
+
+### J — Unallocated Metallized Rolls
+
+اگر متالایزهای بیشتری از ظرفیت وجود داشتند، مازاد به‌عنوان Unallocated نمایش داده شود.
+
+---
+
+# 107. نکته مهم درباره آزادی عمل
+
+موارد بالا را به‌عنوان:
+
+> **Business Requirements + Recommended Architecture**
+
+در نظر بگیرید.
+
+در بخش Architecture و UX شما محدود نیستید.
+
+اگر مثلاً تشخیص دادید که:
+
+```text
+Map
+→
+Index
+→
+Group
+→
+Cache
+```
+
+بهتر از روش فعلی است، استفاده کنید.
+
+اگر ساختار Database بهتری پیشنهاد می‌کنید، استفاده کنید.
+
+اگر UI بهتری برای Sorting، Setup یا Reports پیدا کردید، اجرا کنید.
+
+اگر روش بهتری برای Allocation پیدا کردید که تمام قواعد کسب‌وکار را حفظ می‌کند، استفاده کنید.
+
+اما:
+
+**هیچ راه‌حل جدیدی نباید باعث Double Counting، از بین رفتن Traceability یا تغییر Business Rules قطعی شود.**
+
+---
+
+# 108. Deliverables
+
+در پایان توسعه:
+
+1. تمام فایل‌های اصلاح‌شده پروژه را ایجاد/ویرایش کنید.
+2. ساختار پوشه‌ها را منطقی و تمیز نگه دارید.
+3. وابستگی‌ها Local باشند.
+4. README را به‌روزرسانی کنید.
+5. تست‌های منطقی را اجرا کنید.
+6. تمام قابلیت‌های موجود قبلی را تا حد امکان حفظ کنید.
+7. هیچ Feature فعلی را بدون دلیل حذف نکنید.
+8. اگر Feature فعلی با Business Logic جدید تضاد دارد، آن را با منطق جدید جایگزین کنید.
+9. Code را کامنت‌گذاری منطقی کنید، مخصوصاً Business Logicهای پیچیده.
+10. در پایان یک گزارش کوتاه ارائه کنید که شامل:
+
+* چه فایل‌هایی تغییر کردند
+* چه قابلیت‌هایی اضافه شدند
+* چه بخش‌هایی Refactor شدند
+* چه تست‌هایی انجام شد
+* چه تصمیمات معماری جدیدی گرفته شد
+* چه پیشنهادهایی برای مرحله بعد دارید
+
+باشد.
+
+---
+
+# 109. دستور نهایی
+
+ابتدا **تمام فایل‌های فعلی `roll-monitor` را بررسی و درک کن.**
+
+سپس Architecture فعلی را با این Specification مقایسه کن.
+
+پس از آن:
+
+```text
+Analyze
+ ↓
+Design
+ ↓
+Refactor where necessary
+ ↓
+Implement
+ ↓
+Validate
+ ↓
+Test
+ ↓
+Document
+```
+
+را انجام بده.
+
+از پیاده‌سازی سریع و سطحی خودداری کن.
+
+هدف، ساخت یک سیستم صنعتی قابل اتکا، قابل نگهداری، قابل توسعه و قابل Audit است؛ نه صرفاً اضافه کردن چند جدول و فرم.
+
+هرجا بتوانی با یک طراحی بهتر، سیستم را:
+
+* سریع‌تر
+* دقیق‌تر
+* قابل فهم‌تر
+* مقاوم‌تر در برابر خطای کاربر
+* قابل توسعه‌تر
+* حرفه‌ای‌تر
+
+کنی، از خلاقیت خود استفاده کن و آن راه را انتخاب کن.
+
+اما تمام Business Ruleهای مشخص‌شده در این سند باید بدون کم‌وکاست رعایت شوند.
