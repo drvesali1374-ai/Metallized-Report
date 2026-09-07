@@ -1,0 +1,519 @@
+     1→<!DOCTYPE html>
+     2→<html lang="fa" dir="rtl">
+     3→<head>
+     4→  <meta charset="UTF-8">
+     5→  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+     6→  <title>مانیتورینگ صنعتی | سامانهٔ ردیابی رول‌ها</title>
+     7→  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏭</text></svg>">
+     8→  <link rel="stylesheet" href="style.css">
+     9→</head>
+    10→<body>
+    11→
+    12→  <div class="app-shell">
+    13→
+    14→    <!-- ================= سربرگ ================= -->
+    15→    <header class="app-header">
+    16→      <div class="header-inner">
+    17→        <div class="brand">
+    18→          <span class="brand-icon" aria-hidden="true">
+    19→            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/><path d="M17 18h1"/><path d="M12 18h1"/><path d="M7 18h1"/></svg>
+    20→          </span>
+    21→          <div class="brand-text">
+    22→            <h1>مانیتورینگ صنعتی رول‌ها</h1>
+    23→            <p>سامانهٔ مدیریت و ردیابی چرخهٔ عمر رول — خام → متالایز → برش</p>
+    24→          </div>
+    25→        </div>
+    26→
+    27→        <div class="status-badges">
+    28→          <span class="badge badge-offline" id="badge-offline" title="این برنامه هیچ درخواستی به اینترنت ارسال نمی‌کند">
+    29→            کاملاً آفلاین
+    30→          </span>
+    31→          <span class="badge badge-db" id="badge-db" title="وضعیت پایگاه‌داده محلی مرورگر">
+    32→            <span id="badge-db-text">در حال اتصال…</span>
+    33→          </span>
+    34→        </div>
+    35→      </div>
+    36→
+    37→      <!-- نوار تب‌های اصلی -->
+    38→      <nav class="tabs" role="tablist" aria-label="بخش‌های برنامه">
+    39→        <button class="tab-btn active" role="tab" aria-selected="true" aria-controls="view-dashboard" data-view="dashboard" id="tab-dashboard">
+    40→          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="9" rx="1"/><rect x="14" y="3" width="7" height="5" rx="1"/><rect x="14" y="12" width="7" height="9" rx="1"/><rect x="3" y="16" width="7" height="5" rx="1"/></svg>
+    41→          داشبورد
+    42→        </button>
+    43→        <button class="tab-btn" role="tab" aria-selected="false" aria-controls="view-import" data-view="import" id="tab-import">
+    44→          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+    45→          ورود داده‌ها
+    46→        </button>
+    47→        <button class="tab-btn" role="tab" aria-selected="false" aria-controls="view-rolls" data-view="rolls" id="tab-rolls">
+    48→          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+    49→          رول‌ها
+    50→        </button>
+    51→        <button class="tab-btn" role="tab" aria-selected="false" aria-controls="view-setup" data-view="setup" id="tab-setup">
+    52→          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/></svg>
+    53→          ستاپ‌ها
+    54→        </button>
+    55→        <button class="tab-btn" role="tab" aria-selected="false" aria-controls="view-settings" data-view="settings" id="tab-settings">
+    56→          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg>
+    57→          تنظیمات
+    58→        </button>
+    59→      </nav>
+    60→    </header>
+    61→
+    62→    <!-- ================= محتوای اصلی ================= -->
+    63→    <main class="app-main">
+    64→
+    65→      <!-- ---------- ۱) داشبورد ---------- -->
+    66→      <section class="view active" id="view-dashboard" role="tabpanel" aria-labelledby="tab-dashboard">
+    67→
+    68→        <div class="kpi-grid">
+    69→
+    70→          <article class="kpi-card kpi-raw" aria-label="تعداد رول‌های خام">
+    71→            <div class="kpi-icon" aria-hidden="true">
+    72→              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+    73→            </div>
+    74→            <div class="kpi-body">
+    75→              <h3 class="kpi-title">رول‌های خام</h3>
+    76→              <div class="kpi-value" id="kpi-raw">۰</div>
+    77→              <p class="kpi-desc">نوع فیلم دارای R + شماره پالت خالی (فایل رول‌های موجود)</p>
+    78→              <p class="kpi-meta" id="kpi-raw-meta">—</p>
+    79→              <p class="kpi-file" id="kpi-file-rolls"><span class="muted">فایلی بارگذاری نشده</span></p>
+    80→            </div>
+    81→          </article>
+    82→
+    83→          <article class="kpi-card kpi-metallized" aria-label="تعداد رول‌های متالایز شده">
+    84→            <div class="kpi-icon" aria-hidden="true">
+    85→              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+    86→            </div>
+    87→            <div class="kpi-body">
+    88→              <h3 class="kpi-title">رول‌های متالایز شده</h3>
+    89→              <div class="kpi-value" id="kpi-metallized">۰</div>
+    90→              <p class="kpi-desc">رکوردهای آرشیو با R — یونیک بر اساس شماره رول</p>
+    91→              <p class="kpi-meta" id="kpi-metallized-meta">—</p>
+    92→              <p class="kpi-file" id="kpi-file-archived"><span class="muted">فایلی بارگذاری نشده</span></p>
+    93→            </div>
+    94→          </article>
+    95→
+    96→          <article class="kpi-card kpi-setup" aria-label="تعداد کل رول‌های ستاپ‌ها">
+    97→            <div class="kpi-icon" aria-hidden="true">
+    98→              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 12 10 5 10-5"/><path d="m2 17 10 5 10-5"/></svg>
+    99→            </div>
+   100→            <div class="kpi-body">
+   101→              <h3 class="kpi-title">کل رول‌های ستاپ‌ها</h3>
+   102→              <div class="kpi-value" id="kpi-setup-total">۰</div>
+   103→              <p class="kpi-desc">مجموع ستون «تعداد رول» از تمام رکوردهای ثبت‌شدهٔ کاربر</p>
+   104→              <p class="kpi-meta" id="kpi-setup-meta">—</p>
+   105→            </div>
+   106→          </article>
+   107→
+   108→          <article class="kpi-card kpi-uncut" aria-label="تعداد رول‌های برش نشده">
+   109→            <div class="kpi-icon" aria-hidden="true">
+   110→              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
+   111→            </div>
+   112→            <div class="kpi-body">
+   113→              <h3 class="kpi-title">رول‌های برش‌نشده</h3>
+   114→              <div class="kpi-value" id="kpi-uncut">۰</div>
+   115→              <p class="kpi-desc">Σ [تعداد ستاپ − (خام موجود + متالایز)] — مغایرت ظرفیت جداگانه گزارش می‌شود</p>
+   116→              <p class="kpi-meta" id="kpi-uncut-meta">—</p>
+   117→            </div>
+   118→          </article>
+   119→        </div>
+   120→
+   121→        <!-- مرکز هشدار کیفیت داده (§52) -->
+   122→        <article class="panel alerts-panel" id="alerts-panel" hidden>
+   123→          <h3 class="section-title">
+   124→            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+   125→            مرکز هشدار کیفیت داده
+   126→            <span class="chip chip-warn" id="alerts-count">۰</span>
+   127→          </h3>
+   128→          <div id="alerts-list" class="alerts-list"></div>
+   129→        </article>
+   130→
+   131→        <article class="formula-card">
+   132→          <h3 class="section-title">فرمول‌های محاسباتی</h3>
+   133→          <div class="formula-box" id="formula-box">برش‌نشده = کل ستاپ‌ها − (خام + متالایز)</div>
+   134→          <ul class="formula-notes">
+   135→            <li><b>رول خام:</b> ردیف‌های <code>rolls.xlsx</code> با نوع فیلم شامل R/r و شمارهٔ پالت خالی.</li>
+   136→            <li><b>متالایز:</b> رکوردهای <code>Archived Rolls.xlsx</code> با R/r، یکتاشده بر اساس شمارهٔ رول.</li>
+   137→            <li><b>کلید تطبیق خام (۳فاکتوری):</b> عرض + متراژ استاندارد + شماره ستاپ.</li>
+   138→            <li><b>کلید تطبیق متالایز (۲فاکتوری):</b> عرض + شماره ستاپ — تخصیص ظرفیت‌محور بین دستگاه‌ها.</li>
+   139→            <li><b>مغایرت ظرفیت:</b> اگر خام + متالایز &gt; تعداد ستاپ، مقدار منفی به‌صورت هشدار گزارش می‌شود (برش‌نشده صفر نمایش داده می‌شود).</li>
+   140→          </ul>
+   141→        </article>
+   142→      </section>
+   143→
+   144→      <!-- ---------- ۲) ورود داده‌ها ---------- -->
+   145→      <section class="view" id="view-import" role="tabpanel" aria-labelledby="tab-import" hidden>
+   146→
+   147→        <div class="import-grid">
+   148→
+   149→          <article class="panel import-card" id="card-rolls">
+   150→            <header class="panel-head">
+   151→              <h3>
+   152→                <span class="panel-icon icon-raw" aria-hidden="true">
+   153→                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+   154→                </span>
+   155→                رول‌های موجود
+   156→                <code class="file-hint">rolls.xlsx</code>
+   157→              </h3>
+   158→              <p class="panel-desc">وضعیت فعلی رول‌ها — مبنای شناسایی «رول‌های خام».</p>
+   159→            </header>
+   160→
+   161→            <div class="dropzone" id="drop-rolls" role="button" tabindex="0" aria-label="انتخاب یا رهاکردن فایل rolls.xlsx">
+   162→              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+   163→              <p><b>فایل را اینجا رها کنید</b> یا برای انتخاب کلیک کنید</p>
+   164→              <p class="drop-hint">فقط <code>.xlsx</code> / <code>.xls</code> — با جایگزینی تراکنشی Dataset قبلی</p>
+   165→              <input type="file" id="file-rolls" accept=".xlsx,.xls" hidden aria-hidden="true">
+   166→            </div>
+   167→
+   168→            <div class="import-status" id="status-rolls" aria-live="polite">
+   169→              <p class="status-empty">هنوز فایلی بارگذاری نشده است.</p>
+   170→            </div>
+   171→
+   172→            <details class="import-preview" id="preview-wrap-rolls" hidden>
+   173→              <summary>پیش‌نمایش ۲۰ رکورد اول (مدل نرمال‌شده)</summary>
+   174→              <div id="preview-inner-rolls"></div>
+   175→            </details>
+   176→          </article>
+   177→
+   178→          <article class="panel import-card" id="card-archived">
+   179→            <header class="panel-head">
+   180→              <h3>
+   181→                <span class="panel-icon icon-metal" aria-hidden="true">
+   182→                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+   183→                </span>
+   184→                سابقه رول‌ها (آرشیو)
+   185→                <code class="file-hint">Archived Rolls.xlsx</code>
+   186→              </h3>
+   187→              <p class="panel-desc">تاریخچهٔ وضعیت‌های قبلی رول‌ها — مبنای شمارش «متالایز یونیک».</p>
+   188→            </header>
+   189→
+   190→            <div class="dropzone" id="drop-archived" role="button" tabindex="0" aria-label="انتخاب یا رهاکردن فایل Archived Rolls.xlsx">
+   191→              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+   192→              <p><b>فایل را اینجا رها کنید</b> یا برای انتخاب کلیک کنید</p>
+   193→              <p class="drop-hint">فقط <code>.xlsx</code> / <code>.xls</code> — با جایگزینی تراکنشی Dataset قبلی</p>
+   194→              <input type="file" id="file-archived" accept=".xlsx,.xls" hidden aria-hidden="true">
+   195→            </div>
+   196→
+   197→            <div class="import-status" id="status-archived" aria-live="polite">
+   198→              <p class="status-empty">هنوز فایلی بارگذاری نشده است.</p>
+   199→            </div>
+   200→
+   201→            <details class="import-preview" id="preview-wrap-archived" hidden>
+   202→              <summary>پیش‌نمایش ۲۰ رکورد اول (مدل نرمال‌شده)</summary>
+   203→              <div id="preview-inner-archived"></div>
+   204→            </details>
+   205→          </article>
+   206→        </div>
+   207→
+   208→        <article class="panel notice-panel">
+   209→          <h3 class="section-title">نکات مهم ورود داده‌ها</h3>
+   210→          <ul class="tips-list">
+   211→            <li>فایل‌ها <b>کاملاً محلی</b> خوانده و در IndexedDB مرورگر ذخیره می‌شوند — هیچ داده‌ای به هیچ سروری ارسال نمی‌شود.</li>
+   212→            <li>Import جدید Dataset قبلی همان جدول را <b>جایگزین</b> می‌کند (نه افزودن پیوسته) — پیش از جایگزینی آمار قدیم/جدید نمایش داده می‌شود.</li>
+   213→            <li>ستون‌های الزامی: شمارهٔ رول، عرض (رول اولیه/عرض)، متراژ (اولیه)، ضخامت، نوع فیلم، شمارهٔ پالت، شمارهٔ ستاپ.</li>
+   214→            <li>اگر فایل تکراری (هش یکسان) باشد، سیستم هشدار می‌دهد که محتوای آن تغییری نکرده است.</li>
+   215→          </ul>
+   216→        </article>
+   217→      </section>
+   218→
+   219→      <!-- ---------- ۳) رول‌ها ---------- -->
+   220→      <section class="view" id="view-rolls" role="tabpanel" aria-labelledby="tab-rolls" hidden>
+   221→
+   222→        <!-- تب‌های داخلی -->
+   223→        <div class="subtabs" role="tablist" aria-label="انواع رول">
+   224→          <button class="subtab-btn active" role="tab" aria-selected="true" data-subview="raw" id="subtab-raw">رول‌های خام</button>
+   225→          <button class="subtab-btn" role="tab" aria-selected="false" data-subview="cut" id="subtab-cut">رول‌های برش‌خورده</button>
+   226→        </div>
+   227→
+   228→        <!-- تب رول‌های خام -->
+   229→        <div class="subview active" id="subview-raw" role="tabpanel" aria-labelledby="subtab-raw">
+   230→
+   231→          <article class="panel">
+   232→            <header class="panel-head panel-head-row">
+   233→              <h3>گروه‌بندی رول‌های خام — کلید: عرض + متراژ استاندارد + شمارهٔ ستاپ</h3>
+   234→              <div class="panel-tools" id="rolls-stats"></div>
+   235→            </header>
+   236→
+   237→            <!-- سازندهٔ مرتب‌سازی چندمرحله‌ای کشیدنی (§36-§38) -->
+   238→            <div class="sort-builder">
+   239→              <div class="sort-builder-head">
+   240→                <b>خط لولهٔ مرتب‌سازی:</b>
+   241→                <span class="muted" style="font-size:.72rem">چیپ‌ها را بکشید تا اولویت تغییر کند · ترتیب ذخیره می‌شود</span>
+   242→              </div>
+   243→              <div class="sort-pipeline" id="sort-pipeline" aria-label="مراحل مرتب‌سازی"></div>
+   244→              <div class="sort-add-row">
+   245→                <select id="sort-add-select" class="sort-add-select" aria-label="افزودن فیلد مرتب‌سازی">
+   246→                  <option value="">افزودن فیلد…</option>
+   247→                  <option value="width">عرض</option>
+   248→                  <option value="thickness">ضخامت</option>
+   249→                  <option value="standardLength">متراژ استاندارد</option>
+   250→                  <option value="setupNumber">شمارهٔ ستاپ</option>
+   251→                  <option value="count">تعداد</option>
+   252→                </select>
+   253→                <button type="button" class="btn btn-ghost btn-sm" id="sort-add-btn">افزودن</button>
+   254→                <button type="button" class="btn btn-ghost btn-sm" id="sort-reset-btn">بازنشانی</button>
+   255→              </div>
+   256→            </div>
+   257→
+   258→            <div id="raw-rolls-table"></div>
+   259→          </article>
+   260→        </div>
+   261→
+   262→        <!-- تب رول‌های برش‌خورده — placeholder معماری (§31، §98) -->
+   263→        <div class="subview" id="subview-cut" role="tabpanel" aria-labelledby="subtab-cut" hidden>
+   264→          <article class="panel">
+   265→            <div class="empty-state">
+   266→              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><line x1="20" y1="4" x2="8.12" y2="15.88"/><line x1="14.47" y1="14.48" x2="20" y2="20"/><line x1="8.12" y1="8.12" x2="12" y2="12"/></svg>
+   267→              <h4>رول‌های برش‌خورده — به‌زودی</h4>
+   268→              <p>معماری پایگاه‌داده برای ردیابی زنجیرهٔ رول (مادر ← فرزند) از ابتدا آماده است:<br>
+   269→              <code>parentRollNumber</code> در مدل دادهٔ رزرو شده تا <code>Raw ↔ Metallized ↔ Cut</code> قابل پیوند شود.<br>
+   270→              جزئیات UI و منطق کامل این تب در مرحلهٔ بعدی طراحی خواهد شد.</p>
+   271→            </div>
+   272→          </article>
+   273→        </div>
+   274→      </section>
+   275→
+   276→      <!-- ---------- ۴) ستاپ‌ها ---------- -->
+   277→      <section class="view" id="view-setup" role="tabpanel" aria-labelledby="tab-setup" hidden>
+   278→
+   279→        <!-- فرم ثبت/ویرایش -->
+   280→        <article class="panel">
+   281→          <header class="panel-head">
+   282→            <h3 id="setup-form-title">
+   283→              <span class="panel-icon icon-setup" aria-hidden="true">
+   284→                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+   285→              </span>
+   286→              ثبت رول جدید برای ستاپ
+   287→            </h3>
+   288→            <p class="panel-desc">فیلدهای ستاپ: شماره ستاپ، دستگاه متالایز (۱/۲/۳)، عرض مادر، ضخامت (ارث‌بری خودکار)، متراژ استاندارد (از قوانین)، تعداد و الگوی برش.</p>
+   289→          </header>
+   290→
+   291→          <form id="setup-form" novalidate>
+   292→            <div class="form-grid">
+   293→              <div class="field">
+   294→                <label for="f-setup">شماره ستاپ <b class="req">*</b></label>
+   295→                <input type="text" id="f-setup" inputmode="numeric" placeholder="مثلاً ۱۴۰" autocomplete="off" required>
+   296→                <p class="field-error" id="err-setup" hidden></p>
+   297→                <p class="field-hint" id="hint-setup" hidden></p>
+   298→              </div>
+   299→
+   300→              <div class="field">
+   301→                <label for="f-machine">شماره دستگاه (متالایز) <b class="req">*</b></label>
+   302→                <select id="f-machine" required>
+   303→                  <option value="">— انتخاب کنید —</option>
+   304→                  <option value="1">دستگاه ۱</option>
+   305→                  <option value="2">دستگاه ۲</option>
+   306→                  <option value="3">دستگاه ۳</option>
+   307→                </select>
+   308→                <p class="field-error" id="err-machine" hidden></p>
+   309→              </div>
+   310→
+   311→              <div class="field">
+   312→                <label for="f-width">عرض رول مادر <span class="unit">(mm)</span> <b class="req">*</b></label>
+   313→                <input type="text" id="f-width" inputmode="numeric" placeholder="مثلاً ۲۱۲۰" autocomplete="off" required>
+   314→                <p class="field-error" id="err-width" hidden></p>
+   315→              </div>
+   316→
+   317→              <div class="field">
+   318→                <label for="f-thickness">ضخامت <span class="unit">(میکرون)</span> <b class="req">*</b></label>
+   319→                <input type="text" id="f-thickness" inputmode="numeric" placeholder="مثلاً ۲۰" autocomplete="off" required>
+   320→                <p class="field-error" id="err-thickness" hidden></p>
+   321→                <p class="field-hint" id="hint-thickness" hidden></p>
+   322→              </div>
+   323→
+   324→              <div class="field">
+   325→                <label for="f-standard">متراژ استاندارد <b class="req">*</b></label>
+   326→                <select id="f-standard" required>
+   327→                  <option value="">— انتخاب کنید —</option>
+   328→                </select>
+   329→                <p class="field-error" id="err-standard" hidden></p>
+   330→              </div>
+   331→
+   332→              <div class="field">
+   333→                <label for="f-count">تعداد رول <b class="req">*</b></label>
+   334→                <input type="text" id="f-count" inputmode="numeric" placeholder="مثلاً ۵" autocomplete="off" required>
+   335→                <p class="field-error" id="err-count" hidden></p>
+   336→              </div>
+   337→
+   338→              <div class="field field-wide">
+   339→                <label for="f-pattern">الگوی برش <span class="unit">(اختیاری — اعداد با خط تیره)</span></label>
+   340→                <input type="text" id="f-pattern" placeholder="مثلاً 1100-1170 یا 600-600-600-600" autocomplete="off" dir="ltr">
+   341→                <div class="pattern-feedback" id="pattern-feedback"><span class="muted">اختیاری — مثال: 1100-1170</span></div>
+   342→                <p class="field-error" id="err-pattern" hidden></p>
+   343→              </div>
+   344→
+   345→              <div class="field field-actions">
+   346→                <button type="submit" class="btn btn-primary" id="btn-save-roll">ذخیره رکورد</button>
+   347→                <button type="reset" class="btn btn-ghost" id="btn-reset-form">پاک‌کردن فرم</button>
+   348→                <button type="button" class="btn btn-ghost" id="btn-cancel-edit" hidden>انصراف از ویرایش</button>
+   349→              </div>
+   350→            </div>
+   351→          </form>
+   352→        </article>
+   353→
+   354→        <!-- جدول گزارش ستاپ‌ها -->
+   355→        <article class="panel">
+   356→          <header class="panel-head panel-head-row">
+   357→            <h3>گزارش تولید ستاپ‌ها</h3>
+   358→            <div class="panel-tools">
+   359→              <div id="setup-chips" class="panel-tools"></div>
+   360→              <button type="button" class="btn btn-danger btn-sm" id="btn-clear-setups" hidden>
+   361→                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
+   362→                حذف همه
+   363→              </button>
+   364→            </div>
+   365→          </header>
+   366→          <div id="setup-table-wrap"></div>
+   367→        </article>
+   368→      </section>
+   369→
+   370→      <!-- ---------- ۵) تنظیمات ---------- -->
+   371→      <section class="view" id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden>
+   372→
+   373→        <div class="settings-grid">
+   374→
+   375→          <!-- قوانین متراژ استاندارد -->
+   376→          <article class="panel">
+   377→            <header class="panel-head">
+   378→              <h3 id="rule-form-title">تعریف قانون متراژ استاندارد جدید</h3>
+   379→              <p class="panel-desc">هر قانون: ضخامت (میکرون) + بازهٔ متراژ واقعی (شامل مرزها) → متراژ استاندارد. بازه‌های یک ضخامت نباید هم‌پوشانی داشته باشند.</p>
+   380→            </header>
+   381→
+   382→            <form id="rule-form" novalidate>
+   383→              <div class="rule-grid">
+   384→                <div class="field">
+   385→                  <label for="r-thickness">ضخامت <span class="unit">(μ)</span> <b class="req">*</b></label>
+   386→                  <input type="text" id="r-thickness" inputmode="numeric" placeholder="۲۰" required>
+   387→                  <p class="field-error" id="err-r-thickness" hidden></p>
+   388→                </div>
+   389→                <div class="field">
+   390→                  <label for="r-min">حداقل متراژ <b class="req">*</b></label>
+   391→                  <input type="text" id="r-min" inputmode="numeric" placeholder="۱۷۰۰۰" required>
+   392→                  <p class="field-error" id="err-r-min" hidden></p>
+   393→                </div>
+   394→                <div class="field">
+   395→                  <label for="r-max">حداکثر متراژ <b class="req">*</b></label>
+   396→                  <input type="text" id="r-max" inputmode="numeric" placeholder="۲۴۰۰۰" required>
+   397→                  <p class="field-error" id="err-r-max" hidden></p>
+   398→                </div>
+   399→                <div class="field">
+   400→                  <label for="r-standard">متراژ استاندارد <b class="req">*</b></label>
+   401→                  <input type="text" id="r-standard" inputmode="numeric" placeholder="۲۰۰۰۰" required>
+   402→                  <p class="field-error" id="err-r-standard" hidden></p>
+   403→                </div>
+   404→                <div class="field field-actions">
+   405→                  <button type="submit" class="btn btn-primary" id="btn-rule-save">ذخیره قانون</button>
+   406→                  <button type="button" class="btn btn-ghost" id="rule-cancel-edit" hidden>انصراف از ویرایش</button>
+   407→                </div>
+   408→              </div>
+   409→            </form>
+   410→
+   411→            <div id="rules-table-wrap" class="rules-wrap"></div>
+   412→          </article>
+   413→
+   414→          <!-- پشتیبان‌گیری -->
+   415→          <article class="panel">
+   416→            <header class="panel-head">
+   417→              <h3>پشتیبان‌گیری و بازیابی</h3>
+   418→              <p class="panel-desc">فایل JSON شامل ستاپ‌ها، قوانین، تنظیمات، متادیتا و Datasetهای Import شده.</p>
+   419→            </header>
+   420→
+   421→            <div class="backup-warning" role="alert">
+   422→              <b>⚠ هشدار مهم:</b> اطلاعات این برنامه به‌صورت Local در مرورگر ذخیره می‌شود. برای جلوگیری از از دست رفتن اطلاعات، به‌صورت دوره‌ای Backup تهیه کنید.
+   423→            </div>
+   424→
+   425→            <div class="backup-actions">
+   426→              <button type="button" class="btn btn-primary" id="btn-backup-export">
+   427→                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+   428→                ساخت فایل پشتیبان
+   429→              </button>
+   430→              <button type="button" class="btn btn-ghost" id="btn-restore-pick">
+   431→                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 15V3"/><path d="m7 8 5-5 5 5"/><path d="M5 21h14"/></svg>
+   432→                بازیابی از فایل
+   433→              </button>
+   434→              <input type="file" id="file-restore" accept=".json" hidden aria-hidden="true">
+   435→            </div>
+   436→          </article>
+   437→
+   438→          <!-- مدیریت داده‌ها -->
+   439→          <article class="panel">
+   440→            <header class="panel-head">
+   441→              <h3>مدیریت داده‌ها</h3>
+   442→              <p class="panel-desc">پاک‌سازی Datasetها یا بازنشانی کامل برنامه (با تأیید).</p>
+   443→            </header>
+   444→            <div class="backup-actions">
+   445→              <button type="button" class="btn btn-ghost" id="btn-clear-rolls">پاک‌سازی rolls.xlsx</button>
+   446→              <button type="button" class="btn btn-ghost" id="btn-clear-archived">پاک‌سازی آرشیو</button>
+   447→              <button type="button" class="btn btn-danger" id="btn-clear-all">پاک‌سازی کامل برنامه</button>
+   448→            </div>
+   449→          </article>
+   450→
+   451→          <!-- سابقه Import -->
+   452→          <article class="panel">
+   453→            <header class="panel-head">
+   454→              <h3>سابقهٔ Importها (نسخه‌بندی Dataset)</h3>
+   455→            </header>
+   456→            <div id="import-history-wrap"></div>
+   457→          </article>
+   458→        </div>
+   459→      </section>
+   460→    </main>
+   461→
+   462→    <!-- ================= پاصفحه ================= -->
+   463→    <footer class="app-footer">
+   464→      <p>سامانهٔ مانیتورینگ صنعتی رول‌ها — نسخهٔ ۲٫۰ · تمام پردازش‌ها و ذخیره‌سازی‌ها محلی (IndexedDB) · بدون سرور، بدون CDN</p>
+   465→    </footer>
+   466→  </div>
+   467→
+   468→  <!-- ================= مودال تأیید ================= -->
+   469→  <div class="modal-overlay" id="modal" hidden>
+   470→    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title" aria-describedby="modal-msg">
+   471→      <h3 id="modal-title">تأیید عملیات</h3>
+   472→      <div id="modal-msg" class="modal-msg"></div>
+   473→      <div class="modal-actions">
+   474→        <button type="button" class="btn btn-ghost" id="modal-cancel">انصراف</button>
+   475→        <button type="button" class="btn btn-danger" id="modal-confirm">بله، انجام بده</button>
+   476→      </div>
+   477→    </div>
+   478→  </div>
+   479→
+   480→  <!-- ================= مودال اطلاعاتی (Audit) ================= -->
+   481→  <div class="modal-overlay" id="modal-info" hidden>
+   482→    <div class="modal-card modal-info-card" role="dialog" aria-modal="true" aria-labelledby="modal-info-title">
+   483→      <h3 id="modal-info-title">جزئیات</h3>
+   484→      <div id="modal-info-body" class="modal-msg modal-info-body"></div>
+   485→      <div class="modal-actions">
+   486→        <button type="button" class="btn btn-primary" id="modal-info-close">بستن</button>
+   487→      </div>
+   488→    </div>
+   489→  </div>
+   490→
+   491→  <!-- ================= اعلان‌ها ================= -->
+   492→  <div class="toast-stack" id="toasts" aria-live="polite" aria-atomic="false"></div>
+   493→
+   494→  <!-- ================= اسکریپت‌های لوکال (بدون CDN) ================= -->
+   495→  <!-- کتابخانه‌ها -->
+   496→  <script src="lib/dexie.min.js"></script>
+   497→  <script src="lib/xlsx.full.min.js"></script>
+   498→  <!-- هستهٔ سیستم (ترتیب بارگذاری مهم است) -->
+   499→  <script src="js/config.js"></script>
+   500→  <script src="js/utils.js"></script>
+   501→  <script src="js/normalize.js"></script>
+   502→  <script src="js/database.js"></script>
+   503→  <script src="js/rules.js"></script>
+   504→  <script src="js/setups.js"></script>
+   505→  <script src="js/calc.js"></script>
+   506→  <script src="js/import.js"></script>
+   507→  <script src="js/backup.js"></script>
+   508→  <script src="js/ui.js"></script>
+   509→  <!-- نماها -->
+   510→  <script src="js/views/dashboard.js"></script>
+   511→  <script src="js/views/import.js"></script>
+   512→  <script src="js/views/rolls.js"></script>
+   513→  <script src="js/views/setup.js"></script>
+   514→  <script src="js/views/settings.js"></script>
+   515→  <!-- راه‌انداز -->
+   516→  <script src="js/app.js"></script>
+   517→</body>
+   518→</html>
+   519→

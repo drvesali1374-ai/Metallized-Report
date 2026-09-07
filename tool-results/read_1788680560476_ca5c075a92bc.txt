@@ -1,0 +1,1215 @@
+     1→/* =========================================================================
+     2→   سامانهٔ مانیتورینگ صنعتی رول‌ها — استایل اصلی (نسخهٔ ۲٫۱)
+     3→   تم روشن صنعتی | RTL | واکنش‌گرا | فونت لوکال وزیرمتن
+     4→   -------------------------------------------------------------------------
+     5→   همان سیستم CSS Variable نسخهٔ قبل — با پالت روشن حرفه‌ای:
+     6→   پس‌زمینهٔ خاکستری-کرم ملایم، کارت‌های روشن (نه سفید مطلق)،
+     7→   متن اصلی با کنتراست بالا، خاکستری خوانا برای متن ثانویه،
+     8→   Borderهای ظریف و رنگ‌های مستقل Success/Warning/Error/Info.
+     9→   ========================================================================= */
+    10→
+    11→/* ---------- ۱) فونت فارسی (لوکال — آفلاین) ---------- */
+    12→@font-face {
+    13→  font-family: 'Vazirmatn';
+    14→  src: url('lib/fonts/Vazirmatn-Regular.woff2') format('woff2');
+    15→  font-weight: 400;
+    16→  font-display: swap;
+    17→}
+    18→@font-face {
+    19→  font-family: 'Vazirmatn';
+    20→  src: url('lib/fonts/Vazirmatn-Medium.woff2') format('woff2');
+    21→  font-weight: 500;
+    22→  font-display: swap;
+    23→}
+    24→@font-face {
+    25→  font-family: 'Vazirmatn';
+    26→  src: url('lib/fonts/Vazirmatn-Bold.woff2') format('woff2');
+    27→  font-weight: 700;
+    28→  font-display: swap;
+    29→}
+    30→
+    31→/* ---------- ۲) متغیرها (تم روشن صنعتی) ---------- */
+    32→:root {
+    33→  /* سطوح روشن — بدون سفید مطلق گسترده */
+    34→  --bg: #f1f2ec;
+    35→  --bg-soft: #e9eae2;
+    36→  --surface: #fcfcfa;
+    37→  --surface-2: #f5f6f0;
+    38→  --border: #dcded2;
+    39→  --border-strong: #c5c9ba;
+    40→
+    41→  /* متن — کنتراست بالا + خاکستری خوانا */
+    42→  --text: #21262b;
+    43→  --text-muted: #575e66;
+    44→  --text-faint: #878e95;
+    45→
+    46→  /* رنگ‌های وضعیت — مستقل و قابل‌تمییز روی زمینهٔ روشن */
+    47→  --raw: #047857;                    /* Success — زمردی تیره */
+    48→  --raw-soft: rgba(4, 120, 87, 0.09);
+    49→  --metal: #b45309;                  /* Warning — کهربایی تیره */
+    50→  --metal-soft: rgba(180, 83, 9, 0.09);
+    51→  --setup: #0f766e;                  /* Info/Accent — فیروزه‌ای تیره */
+    52→  --setup-soft: rgba(15, 118, 110, 0.09);
+    53→  --uncut: #be123c;                  /* خطر/برش‌نشده — رز تیره */
+    54→  --uncut-soft: rgba(190, 18, 60, 0.08);
+    55→  --danger: #dc2626;                 /* Error — قرمز */
+    56→  --danger-text: #b91c1c;            /* متن خطا روی زمینهٔ روشن */
+    57→
+    58→  --radius: 14px;
+    59→  --radius-sm: 10px;
+    60→  --shadow: 0 10px 28px rgba(35, 42, 36, 0.12);
+    61→  --shadow-soft: 0 2px 10px rgba(35, 42, 36, 0.07);
+    62→  --font: 'Vazirmatn', 'Tahoma', 'Segoe UI', sans-serif;
+    63→}
+    64→
+    65→/* ---------- ۳) ریست و پایه ---------- */
+    66→*, *::before, *::after { box-sizing: border-box; }
+    67→
+    68→/* مهم: ویژگی hidden بر هر display غلبه کند (پنجره‌های بسته پنهان بمانند) */
+    69→[hidden] { display: none !important; }
+    70→
+    71→html { scroll-behavior: smooth; }
+    72→
+    73→body {
+    74→  margin: 0;
+    75→  font-family: var(--font);
+    76→  background:
+    77→    radial-gradient(1200px 500px at 85% -10%, rgba(15, 118, 110, 0.05), transparent 60%),
+    78→    radial-gradient(900px 420px at 0% 0%, rgba(180, 83, 9, 0.04), transparent 55%),
+    79→    var(--bg);
+    80→  color: var(--text);
+    81→  line-height: 1.75;
+    82→  min-height: 100vh;
+    83→  -webkit-font-smoothing: antialiased;
+    84→}
+    85→
+    86→::-webkit-scrollbar { width: 10px; height: 10px; }
+    87→::-webkit-scrollbar-track { background: var(--bg-soft); }
+    88→::-webkit-scrollbar-thumb { background: #c9cdbf; border-radius: 8px; }
+    89→::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }
+    90→
+    91→code {
+    92→  font-family: 'Consolas', 'Courier New', monospace;
+    93→  background: var(--surface-2);
+    94→  border: 1px solid var(--border);
+    95→  border-radius: 6px;
+    96→  padding: 0 6px;
+    97→  font-size: 0.85em;
+    98→  color: var(--metal);
+    99→  direction: ltr;
+   100→  display: inline-block;
+   101→}
+   102→
+   103→.muted { color: var(--text-faint); }
+   104→
+   105→:focus-visible {
+   106→  outline: 2px solid var(--setup);
+   107→  outline-offset: 2px;
+   108→  border-radius: 6px;
+   109→}
+   110→
+   111→.sr-only {
+   112→  position: absolute;
+   113→  width: 1px; height: 1px;
+   114→  padding: 0; margin: -1px;
+   115→  overflow: hidden;
+   116→  clip: rect(0 0 0 0);
+   117→  white-space: nowrap;
+   118→  border: 0;
+   119→}
+   120→
+   121→/* ---------- ۴) قالب کلی + پاصفحهٔ چسبیده ---------- */
+   122→.app-shell {
+   123→  display: flex;
+   124→  flex-direction: column;
+   125→  min-height: 100vh;
+   126→}
+   127→
+   128→.app-main {
+   129→  flex: 1;
+   130→  width: 100%;
+   131→  max-width: 1360px;
+   132→  margin: 0 auto;
+   133→  padding: 24px 20px 40px;
+   134→}
+   135→
+   136→/* ---------- ۵) سربرگ ---------- */
+   137→.app-header {
+   138→  background: rgba(252, 252, 250, 0.88);
+   139→  backdrop-filter: blur(12px);
+   140→  border-bottom: 1px solid var(--border);
+   141→  position: sticky;
+   142→  top: 0;
+   143→  z-index: 50;
+   144→}
+   145→
+   146→.header-inner {
+   147→  max-width: 1360px;
+   148→  margin: 0 auto;
+   149→  padding: 14px 20px;
+   150→  display: flex;
+   151→  align-items: center;
+   152→  justify-content: space-between;
+   153→  gap: 16px;
+   154→  flex-wrap: wrap;
+   155→}
+   156→
+   157→.brand { display: flex; align-items: center; gap: 12px; }
+   158→
+   159→.brand-icon {
+   160→  width: 46px; height: 46px;
+   161→  display: grid; place-items: center;
+   162→  border-radius: 12px;
+   163→  color: var(--setup);
+   164→  background: var(--setup-soft);
+   165→  border: 1px solid rgba(15, 118, 110, 0.25);
+   166→  flex-shrink: 0;
+   167→}
+   168→.brand-icon svg { width: 26px; height: 26px; }
+   169→
+   170→.brand-text h1 { margin: 0; font-size: 1.1rem; font-weight: 700; color: var(--text); }
+   171→.brand-text p { margin: 0; font-size: 0.75rem; color: var(--text-muted); }
+   172→
+   173→.status-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+   174→
+   175→.badge {
+   176→  display: inline-flex;
+   177→  align-items: center;
+   178→  gap: 6px;
+   179→  font-size: 0.72rem;
+   180→  font-weight: 500;
+   181→  padding: 5px 12px;
+   182→  border-radius: 999px;
+   183→  border: 1px solid var(--border);
+   184→  background: var(--surface);
+   185→  color: var(--text-muted);
+   186→}
+   187→.badge-offline { color: var(--raw); border-color: rgba(4, 120, 87, 0.3); background: var(--raw-soft); }
+   188→.badge-db.ok { color: var(--raw); border-color: rgba(4, 120, 87, 0.3); }
+   189→.badge-db.err { color: var(--danger); border-color: rgba(220, 38, 38, 0.35); }
+   190→
+   191→/* ---------- ۶) تب‌های اصلی و داخلی ---------- */
+   192→.tabs {
+   193→  max-width: 1360px;
+   194→  margin: 0 auto;
+   195→  padding: 0 20px;
+   196→  display: flex;
+   197→  gap: 4px;
+   198→  overflow-x: auto;
+   199→}
+   200→
+   201→.tab-btn {
+   202→  position: relative;
+   203→  display: inline-flex;
+   204→  align-items: center;
+   205→  gap: 8px;
+   206→  padding: 10px 16px 12px;
+   207→  background: none;
+   208→  border: none;
+   209→  border-bottom: 2px solid transparent;
+   210→  color: var(--text-muted);
+   211→  font-family: var(--font);
+   212→  font-size: 0.88rem;
+   213→  font-weight: 500;
+   214→  cursor: pointer;
+   215→  white-space: nowrap;
+   216→  transition: color 0.2s ease, border-color 0.2s ease;
+   217→}
+   218→.tab-btn svg { width: 16px; height: 16px; }
+   219→.tab-btn:hover { color: var(--text); }
+   220→.tab-btn.active { color: var(--setup); border-bottom-color: var(--setup); }
+   221→
+   222→.subtabs {
+   223→  display: flex;
+   224→  gap: 6px;
+   225→  margin-bottom: 16px;
+   226→  border-bottom: 1px solid var(--border);
+   227→  padding-bottom: 0;
+   228→}
+   229→
+   230→.subtab-btn {
+   231→  padding: 8px 18px;
+   232→  background: none;
+   233→  border: none;
+   234→  border-bottom: 2px solid transparent;
+   235→  color: var(--text-muted);
+   236→  font-family: var(--font);
+   237→  font-size: 0.85rem;
+   238→  font-weight: 500;
+   239→  cursor: pointer;
+   240→}
+   241→.subtab-btn.active { color: var(--raw); border-bottom-color: var(--raw); }
+   242→
+   243→.subview { display: none; animation: fadeIn 0.3s ease; }
+   244→.subview.active { display: block; }
+   245→
+   246→.view { display: none; animation: fadeIn 0.35s ease; }
+   247→.view.active { display: block; }
+   248→
+   249→@keyframes fadeIn {
+   250→  from { opacity: 0; transform: translateY(8px); }
+   251→  to   { opacity: 1; transform: translateY(0); }
+   252→}
+   253→
+   254→/* ---------- ۷) کارت‌های KPI ---------- */
+   255→.kpi-grid {
+   256→  display: grid;
+   257→  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+   258→  gap: 18px;
+   259→  margin-bottom: 22px;
+   260→}
+   261→
+   262→.kpi-card {
+   263→  position: relative;
+   264→  overflow: hidden;
+   265→  background: linear-gradient(160deg, var(--surface) 0%, var(--surface-2) 100%);
+   266→  border: 1px solid var(--border);
+   267→  border-radius: var(--radius);
+   268→  padding: 20px;
+   269→  display: flex;
+   270→  gap: 16px;
+   271→  align-items: flex-start;
+   272→  transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+   273→  box-shadow: var(--shadow-soft);
+   274→}
+   275→.kpi-card:hover { transform: translateY(-4px); box-shadow: var(--shadow); border-color: var(--border-strong); }
+   276→.kpi-card::before { content: ''; position: absolute; top: 0; right: 0; left: 0; height: 3px; }
+   277→
+   278→.kpi-raw::before        { background: var(--raw); }
+   279→.kpi-metallized::before { background: var(--metal); }
+   280→.kpi-setup::before      { background: var(--setup); }
+   281→.kpi-uncut::before      { background: var(--uncut); }
+   282→
+   283→.kpi-icon { width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; flex-shrink: 0; }
+   284→.kpi-icon svg { width: 25px; height: 25px; }
+   285→
+   286→.kpi-raw .kpi-icon        { color: var(--raw);   background: var(--raw-soft); }
+   287→.kpi-metallized .kpi-icon { color: var(--metal); background: var(--metal-soft); }
+   288→.kpi-setup .kpi-icon      { color: var(--setup); background: var(--setup-soft); }
+   289→.kpi-uncut .kpi-icon      { color: var(--uncut); background: var(--uncut-soft); }
+   290→
+   291→.kpi-body { min-width: 0; flex: 1; }
+   292→.kpi-title { margin: 0 0 2px; font-size: 0.88rem; font-weight: 500; color: var(--text-muted); }
+   293→.kpi-value { font-size: 2.5rem; font-weight: 700; line-height: 1.25; letter-spacing: -1px; color: var(--text); }
+   294→
+   295→.kpi-raw .kpi-value        { color: var(--raw); }
+   296→.kpi-metallized .kpi-value { color: var(--metal); }
+   297→.kpi-setup .kpi-value      { color: var(--setup); }
+   298→.kpi-uncut .kpi-value      { color: var(--uncut); }
+   299→
+   300→.kpi-desc { margin: 4px 0 0; font-size: 0.72rem; color: var(--text-faint); }
+   301→.kpi-meta {
+   302→  margin: 8px 0 0;
+   303→  font-size: 0.72rem;
+   304→  color: var(--text-muted);
+   305→  border-top: 1px dashed var(--border);
+   306→  padding-top: 8px;
+   307→}
+   308→.kpi-file { margin: 4px 0 0; font-size: 0.68rem; color: var(--text-faint); }
+   309→
+   310→.kpi-card.negative { border-color: rgba(220, 38, 38, 0.45); }
+   311→.kpi-card.negative::before { background: var(--danger); }
+   312→.kpi-card.negative .kpi-value { color: var(--danger-text); animation: pulse 1.6s ease infinite; }
+   313→
+   314→@keyframes pulse {
+   315→  0%, 100% { opacity: 1; }
+   316→  50%      { opacity: 0.55; }
+   317→}
+   318→
+   319→/* ---------- ۸) پنل‌ها ---------- */
+   320→.formula-card, .panel, .notice-panel, .alerts-panel {
+   321→  background: var(--surface);
+   322→  border: 1px solid var(--border);
+   323→  border-radius: var(--radius);
+   324→  padding: 20px;
+   325→  margin-bottom: 18px;
+   326→  box-shadow: var(--shadow-soft);
+   327→}
+   328→
+   329→.section-title {
+   330→  display: flex;
+   331→  align-items: center;
+   332→  gap: 8px;
+   333→  margin: 0 0 14px;
+   334→  font-size: 0.95rem;
+   335→  font-weight: 700;
+   336→  flex-wrap: wrap;
+   337→  color: var(--text);
+   338→}
+   339→.section-title svg { width: 18px; height: 18px; color: var(--text-muted); }
+   340→
+   341→.formula-box {
+   342→  background: var(--bg-soft);
+   343→  border: 1px dashed var(--border-strong);
+   344→  border-radius: var(--radius-sm);
+   345→  padding: 14px 18px;
+   346→  text-align: center;
+   347→  font-weight: 700;
+   348→  font-size: 0.95rem;
+   349→  color: var(--setup);
+   350→  margin-bottom: 12px;
+   351→}
+   352→.formula-box.negative { color: var(--danger-text); border-color: rgba(220, 38, 38, 0.45); }
+   353→
+   354→.formula-notes, .tips-list {
+   355→  margin: 0;
+   356→  padding-inline-start: 20px;
+   357→  color: var(--text-muted);
+   358→  font-size: 0.8rem;
+   359→  display: grid;
+   360→  gap: 6px;
+   361→}
+   362→
+   363→.import-grid {
+   364→  display: grid;
+   365→  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+   366→  gap: 18px;
+   367→}
+   368→
+   369→.settings-grid {
+   370→  display: grid;
+   371→  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+   372→  gap: 18px;
+   373→  align-items: start;
+   374→}
+   375→
+   376→/* پنل تمام‌عرض در Settings (Mapping) */
+   377→.panel-wide { grid-column: 1 / -1; }
+   378→
+   379→.panel-head { margin-bottom: 14px; }
+   380→.panel-head-row {
+   381→  display: flex;
+   382→  align-items: center;
+   383→  justify-content: space-between;
+   384→  gap: 12px;
+   385→  flex-wrap: wrap;
+   386→}
+   387→
+   388→.panel-head h3 {
+   389→  display: flex;
+   390→  align-items: center;
+   391→  gap: 10px;
+   392→  margin: 0;
+   393→  font-size: 0.98rem;
+   394→  font-weight: 700;
+   395→  flex-wrap: wrap;
+   396→  color: var(--text);
+   397→}
+   398→
+   399→.panel-icon { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; flex-shrink: 0; }
+   400→.panel-icon svg { width: 18px; height: 18px; }
+   401→.icon-raw   { color: var(--raw);   background: var(--raw-soft); }
+   402→.icon-metal { color: var(--metal); background: var(--metal-soft); }
+   403→.icon-setup { color: var(--setup); background: var(--setup-soft); }
+   404→
+   405→.panel-desc { margin: 6px 0 0; font-size: 0.78rem; color: var(--text-muted); }
+   406→.file-hint { font-size: 0.7rem; padding: 2px 8px; }
+   407→
+   408→/* ---------- ۹) مرکز هشدار (§52) ---------- */
+   409→.alerts-list { display: grid; gap: 10px; max-height: 340px; overflow-y: auto; padding-inline-end: 4px; }
+   410→
+   411→.alert-item {
+   412→  display: flex;
+   413→  align-items: flex-start;
+   414→  gap: 10px;
+   415→  border-radius: var(--radius-sm);
+   416→  border: 1px solid var(--border);
+   417→  padding: 10px 14px;
+   418→  background: var(--bg-soft);
+   419→  animation: fadeIn 0.3s ease;
+   420→}
+   421→.alert-item .alert-body { flex: 1; min-width: 0; }
+   422→.alert-item b { display: block; font-size: 0.82rem; color: var(--text); }
+   423→.alert-item p { margin: 2px 0 0; font-size: 0.75rem; color: var(--text-muted); }
+   424→
+   425→.alert-badge {
+   426→  flex-shrink: 0;
+   427→  font-size: 0.68rem;
+   428→  font-weight: 700;
+   429→  padding: 2px 10px;
+   430→  border-radius: 999px;
+   431→}
+   432→.alert-error   { border-color: rgba(220, 38, 38, 0.4); background: rgba(220, 38, 38, 0.04); }
+   433→.alert-error .alert-badge   { background: rgba(220, 38, 38, 0.12); color: var(--danger-text); }
+   434→.alert-warning { border-color: rgba(180, 83, 9, 0.35); background: rgba(180, 83, 9, 0.04); }
+   435→.alert-warning .alert-badge { background: var(--metal-soft); color: var(--metal); }
+   436→
+   437→.alert-item .btn { flex-shrink: 0; }
+   438→
+   439→/* ---------- ۱۰) Dropzone و وضعیت Import ---------- */
+   440→.dropzone {
+   441→  border: 2px dashed var(--border-strong);
+   442→  border-radius: var(--radius-sm);
+   443→  background: var(--bg-soft);
+   444→  padding: 26px 16px;
+   445→  text-align: center;
+   446→  cursor: pointer;
+   447→  transition: border-color 0.2s ease, background 0.2s ease, transform 0.15s ease;
+   448→  user-select: none;
+   449→}
+   450→.dropzone svg { width: 30px; height: 30px; color: var(--text-faint); margin-bottom: 6px; }
+   451→.dropzone p { margin: 0; font-size: 0.85rem; color: var(--text-muted); }
+   452→.dropzone .drop-hint { margin-top: 6px; font-size: 0.7rem; color: var(--text-faint); }
+   453→
+   454→.dropzone:hover, .dropzone:focus-visible, .dropzone.dragover {
+   455→  border-color: var(--setup);
+   456→  background: var(--setup-soft);
+   457→  transform: scale(1.01);
+   458→}
+   459→.dropzone.dragover svg, .dropzone:hover svg { color: var(--setup); }
+   460→.dropzone.loading { pointer-events: none; opacity: 0.6; }
+   461→
+   462→.import-status {
+   463→  margin-top: 14px;
+   464→  border-radius: var(--radius-sm);
+   465→  border: 1px solid var(--border);
+   466→  background: var(--bg-soft);
+   467→  padding: 12px 16px;
+   468→  font-size: 0.78rem;
+   469→  color: var(--text-muted);
+   470→}
+   471→.import-status .status-empty { margin: 0; color: var(--text-faint); }
+   472→.import-status.ok  { border-color: rgba(4, 120, 87, 0.35); }
+   473→.import-status.err { border-color: rgba(220, 38, 38, 0.45); }
+   474→
+   475→.status-row {
+   476→  display: flex;
+   477→  align-items: center;
+   478→  gap: 8px;
+   479→  margin: 2px 0;
+   480→  flex-wrap: wrap;
+   481→}
+   482→.status-row b { color: var(--text); font-weight: 600; }
+   483→.status-row .num, .num { color: var(--setup); font-weight: 700; }
+   484→.status-row .num-warn { color: var(--metal); font-weight: 700; }
+   485→.status-row.muted { color: var(--text-faint); font-size: 0.72rem; }
+   486→
+   487→/* سطر مشکل‌دارِ قابل کلیک → Drill-down رکوردهای عامل (§9 اصلاحات) */
+   488→button.status-row, .status-row-link {
+   489→  width: 100%;
+   490→  text-align: right;
+   491→  background: transparent;
+   492→  border: 1px dashed transparent;
+   493→  border-radius: 8px;
+   494→  cursor: pointer;
+   495→  font-family: var(--font);
+   496→  color: var(--text-muted);
+   497→  transition: background 0.15s ease, border-color 0.15s ease;
+   498→}
+   499→.status-row-link:hover, .status-row-link:focus-visible {
+   500→  background: var(--metal-soft);
+   501→  border-color: rgba(180, 83, 9, 0.4);
+   502→  color: var(--text);
+   503→}
+   504→.drill-hint { font-size: 0.68rem; color: var(--metal); font-weight: 700; margin-inline-start: auto; }
+   505→
+   506→.status-icon { width: 15px; height: 15px; flex-shrink: 0; display: inline-grid; place-items: center; }
+   507→.status-icon svg { width: 15px; height: 15px; }
+   508→.status-icon.ok { color: var(--raw); }
+   509→.status-icon.err { color: var(--metal); }
+   510→
+   511→/* گزارشنمای Import (§11) */
+   512→.report-grid {
+   513→  display: grid;
+   514→  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+   515→  gap: 4px 12px;
+   516→  margin: 8px 0;
+   517→  padding: 8px 10px;
+   518→  border-radius: 8px;
+   519→  background: var(--surface);
+   520→}
+   521→
+   522→.import-preview { margin-top: 12px; }
+   523→.import-preview summary {
+   524→  cursor: pointer;
+   525→  font-size: 0.78rem;
+   526→  color: var(--setup);
+   527→  font-weight: 500;
+   528→  padding: 4px 0;
+   529→  user-select: none;
+   530→}
+   531→.import-preview summary:hover { text-decoration: underline; }
+   532→
+   533→/* ---------- ۱۱) جدول‌ها ---------- */
+   534→.table-wrap { overflow-x: auto; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+   535→.table-scroll { max-height: 480px; overflow-y: auto; }
+   536→
+   537→.data-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; background: var(--surface); }
+   538→.data-table th, .data-table td {
+   539→  padding: 9px 12px;
+   540→  text-align: right;
+   541→  border-bottom: 1px solid var(--border);
+   542→  white-space: nowrap;
+   543→  color: var(--text);
+   544→}
+   545→.data-table thead th {
+   546→  position: sticky;
+   547→  top: 0;
+   548→  z-index: 2;
+   549→  background: var(--surface-2);
+   550→  color: var(--text-muted);
+   551→  font-weight: 600;
+   552→  font-size: 0.73rem;
+   553→  border-bottom: 1px solid var(--border-strong);
+   554→}
+   555→.data-table tbody tr:hover { background: rgba(15, 118, 110, 0.05); }
+   556→.data-table td.ltr { direction: ltr; text-align: left; font-family: 'Consolas', monospace; font-size: 0.72rem; }
+   557→.data-table .film-r { color: var(--raw); font-weight: 700; }
+   558→.data-table .film-bad { color: var(--danger-text); }
+   559→.data-table .count-cell { color: var(--metal); font-weight: 700; font-size: 0.88rem; }
+   560→.data-table .thickness-cell { color: var(--setup); font-weight: 600; }
+   561→.data-table tr.group-boundary td { border-top: 2px solid var(--border-strong); }
+   562→
+   563→.data-table td.num-raw   { color: var(--raw); font-weight: 700; }
+   564→.data-table td.num-metal { color: var(--metal); font-weight: 700; }
+   565→.data-table td.num-uncut { color: var(--uncut); font-weight: 700; }
+   566→
+   567→/* ---------- ۱۲) صفحه‌بندی ---------- */
+   568→.pager {
+   569→  display: flex;
+   570→  align-items: center;
+   571→  justify-content: center;
+   572→  gap: 8px;
+   573→  flex-wrap: wrap;
+   574→  padding: 12px 8px 4px;
+   575→}
+   576→.pager-info { font-size: 0.72rem; color: var(--text-muted); }
+   577→.btn-sm { padding: 6px 12px; font-size: 0.75rem; min-height: 34px; }
+   578→
+   579→/* ---------- ۱۳) سازندهٔ مرتب‌سازی (§36-§38) ---------- */
+   580→.sort-builder {
+   581→  border: 1px solid var(--border);
+   582→  border-radius: var(--radius-sm);
+   583→  background: var(--bg-soft);
+   584→  padding: 12px 14px;
+   585→  margin-bottom: 16px;
+   586→}
+   587→.sort-builder-head {
+   588→  display: flex;
+   589→  align-items: center;
+   590→  gap: 10px;
+   591→  flex-wrap: wrap;
+   592→  margin-bottom: 10px;
+   593→  font-size: 0.8rem;
+   594→  color: var(--text);
+   595→}
+   596→
+   597→.sort-pipeline { display: flex; gap: 8px; flex-wrap: wrap; min-height: 34px; align-items: center; }
+   598→
+   599→.sort-chip {
+   600→  display: inline-flex;
+   601→  align-items: center;
+   602→  gap: 6px;
+   603→  background: var(--surface);
+   604→  border: 1px solid var(--border-strong);
+   605→  border-radius: 999px;
+   606→  padding: 4px 6px 4px 12px;
+   607→  font-size: 0.75rem;
+   608→  cursor: grab;
+   609→  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+   610→  user-select: none;
+   611→  color: var(--text);
+   612→}
+   613→.sort-chip:hover { border-color: var(--setup); }
+   614→.sort-chip.dragging { opacity: 0.5; cursor: grabbing; transform: scale(0.97); }
+   615→.sort-chip.drag-over { border-color: var(--setup); box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.18); }
+   616→
+   617→.sort-chip .grip { color: var(--text-faint); display: inline-grid; place-items: center; }
+   618→.sort-chip .grip svg { width: 13px; height: 13px; }
+   619→
+   620→.sort-priority {
+   621→  width: 20px; height: 20px;
+   622→  display: grid; place-items: center;
+   623→  background: var(--setup-soft);
+   624→  color: var(--setup);
+   625→  border-radius: 50%;
+   626→  font-size: 0.65rem;
+   627→  font-weight: 700;
+   628→}
+   629→
+   630→.sort-label { font-weight: 500; }
+   631→
+   632→.sort-dir {
+   633→  width: 24px; height: 24px;
+   634→  border-radius: 6px;
+   635→  border: 1px solid var(--border-strong);
+   636→  background: var(--surface);
+   637→  color: var(--text-muted);
+   638→  font-size: 0.8rem;
+   639→  font-weight: 700;
+   640→  cursor: pointer;
+   641→  font-family: var(--font);
+   642→}
+   643→.sort-dir.asc { color: var(--raw); }
+   644→.sort-dir.desc { color: var(--metal); }
+   645→.sort-dir:hover { border-color: var(--setup); color: var(--text); }
+   646→
+   647→.sort-remove {
+   648→  width: 22px; height: 22px;
+   649→  border: none;
+   650→  background: none;
+   651→  color: var(--text-faint);
+   652→  cursor: pointer;
+   653→  display: grid; place-items: center;
+   654→  border-radius: 6px;
+   655→}
+   656→.sort-remove svg { width: 12px; height: 12px; }
+   657→.sort-remove:hover { color: var(--danger-text); background: rgba(220, 38, 38, 0.1); }
+   658→
+   659→.sort-add-row { display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap; }
+   660→.sort-add-select {
+   661→  font-family: var(--font);
+   662→  font-size: 0.78rem;
+   663→  color: var(--text);
+   664→  background: var(--surface);
+   665→  border: 1px solid var(--border-strong);
+   666→  border-radius: var(--radius-sm);
+   667→  padding: 7px 12px;
+   668→}
+   669→
+   670→/* ---------- ۱۴) وضعیت تطبیق گروه‌ها ---------- */
+   671→.status-pill {
+   672→  display: inline-block;
+   673→  font-size: 0.7rem;
+   674→  font-weight: 600;
+   675→  padding: 2px 10px;
+   676→  border-radius: 999px;
+   677→  white-space: nowrap;
+   678→}
+   679→.pill-ok     { background: var(--raw-soft); color: var(--raw); border: 1px solid rgba(4, 120, 87, 0.3); }
+   680→.pill-warn   { background: var(--metal-soft); color: var(--metal); border: 1px solid rgba(180, 83, 9, 0.3); }
+   681→.pill-muted  { background: var(--surface-2); color: var(--text-faint); border: 1px solid var(--border); }
+   682→.pill-bad    { background: rgba(220, 38, 38, 0.08); color: var(--danger-text); border: 1px solid rgba(220, 38, 38, 0.35); }
+   683→
+   684→/* ---------- ۱۵) چیپ‌ها ---------- */
+   685→.panel-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+   686→
+   687→.chip {
+   688→  font-size: 0.7rem;
+   689→  padding: 4px 12px;
+   690→  border-radius: 999px;
+   691→  background: var(--bg-soft);
+   692→  border: 1px solid var(--border);
+   693→  color: var(--text-muted);
+   694→}
+   695→.chip-strong { color: var(--metal); border-color: rgba(180, 83, 9, 0.35); background: var(--metal-soft); font-weight: 700; }
+   696→.chip-ok     { color: var(--raw); border-color: rgba(4, 120, 87, 0.35); background: var(--raw-soft); }
+   697→.chip-warn   { color: var(--metal); border-color: rgba(180, 83, 9, 0.4); background: var(--metal-soft); font-weight: 600; }
+   698→
+   699→/* ---------- ۱۶) فرم‌ها ---------- */
+   700→.form-grid {
+   701→  display: grid;
+   702→  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+   703→  gap: 14px;
+   704→  align-items: start;
+   705→}
+   706→
+   707→.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+   708→.field-wide { grid-column: 1 / -1; }
+   709→.field label { font-size: 0.78rem; font-weight: 500; color: var(--text-muted); }
+   710→.field .req { color: var(--uncut); }
+   711→.field .unit { color: var(--text-faint); font-weight: 400; font-size: 0.7rem; }
+   712→
+   713→.field input, .field select, .field textarea {
+   714→  font-family: var(--font);
+   715→  font-size: 0.88rem;
+   716→  color: var(--text);
+   717→  background: var(--surface);
+   718→  border: 1px solid var(--border-strong);
+   719→  border-radius: var(--radius-sm);
+   720→  padding: 10px 14px;
+   721→  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+   722→  width: 100%;
+   723→}
+   724→.field input::placeholder, .field textarea::placeholder { color: var(--text-faint); }
+   725→.field input:hover, .field select:hover, .field textarea:hover { border-color: #b3b8a8; }
+   726→.field input:focus, .field select:focus, .field textarea:focus {
+   727→  outline: none;
+   728→  border-color: var(--setup);
+   729→  box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
+   730→}
+   731→.field input:disabled, .field select:disabled {
+   732→  opacity: 0.6;
+   733→  cursor: not-allowed;
+   734→  background: var(--bg-soft);
+   735→  border-style: dashed;
+   736→}
+   737→.field input.invalid, .field select.invalid, .field textarea.invalid {
+   738→  border-color: var(--danger);
+   739→  box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.12);
+   740→}
+   741→
+   742→.field-error { margin: 0; font-size: 0.68rem; color: var(--danger-text); }
+   743→.field-hint {
+   744→  margin: 0;
+   745→  font-size: 0.68rem;
+   746→  color: var(--setup);
+   747→  background: var(--setup-soft);
+   748→  border: 1px dashed rgba(15, 118, 110, 0.35);
+   749→  border-radius: 8px;
+   750→  padding: 5px 10px;
+   751→}
+   752→
+   753→.field-actions { display: flex; gap: 10px; align-items: flex-end; padding-top: 4px; flex-wrap: wrap; }
+   754→
+   755→.rule-grid {
+   756→  display: grid;
+   757→  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+   758→  gap: 12px;
+   759→  align-items: start;
+   760→}
+   761→
+   762→/* ---------- ۱۷) بازخورد زندهٔ الگوی برش (§29) ---------- */
+   763→.pattern-feedback {
+   764→  margin-top: 4px;
+   765→  font-size: 0.72rem;
+   766→  border-radius: 8px;
+   767→  padding: 6px 12px;
+   768→  border: 1px dashed var(--border-strong);
+   769→  color: var(--text-muted);
+   770→  min-height: 30px;
+   771→}
+   772→.pattern-feedback.valid   { border-color: rgba(4, 120, 87, 0.45); color: var(--raw); background: var(--raw-soft); }
+   773→.pattern-feedback.invalid { border-color: rgba(220, 38, 38, 0.45); color: var(--danger-text); background: rgba(220, 38, 38, 0.06); }
+   774→.pattern-feedback b { font-weight: 700; }
+   775→
+   776→.pf-status { font-weight: 700; }
+   777→
+   778→/* ---------- ۱۸) کارت‌های الگوی برش در جدول (§30) ---------- */
+   779→.pattern-cards { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+   780→
+   781→.pattern-card {
+   782→  display: inline-grid;
+   783→  place-items: center;
+   784→  min-width: 46px;
+   785→  padding: 3px 8px;
+   786→  border-radius: 8px;
+   787→  border: 1px solid rgba(15, 118, 110, 0.35);
+   788→  background: var(--setup-soft);
+   789→  color: var(--setup);
+   790→  font-size: 0.72rem;
+   791→  font-weight: 700;
+   792→  font-family: 'Vazirmatn', sans-serif;
+   793→}
+   794→
+   795→.pattern-sum {
+   796→  font-size: 0.66rem;
+   797→  color: var(--text-faint);
+   798→  margin-top: 3px;
+   799→  white-space: nowrap;
+   800→}
+   801→
+   802→/* ---------- ۱۹) نشان مغایرت ظرفیت (§86) ---------- */
+   803→.conflict-badge {
+   804→  display: inline-block;
+   805→  margin-inline-start: 6px;
+   806→  font-size: 0.65rem;
+   807→  font-weight: 700;
+   808→  color: var(--danger-text);
+   809→  background: rgba(220, 38, 38, 0.1);
+   810→  border: 1px solid rgba(220, 38, 38, 0.4);
+   811→  border-radius: 999px;
+   812→  padding: 1px 8px;
+   813→  animation: pulse 1.8s ease infinite;
+   814→  white-space: nowrap;
+   815→}
+   816→
+   817→/* ---------- ۲۰) دکمه‌ها ---------- */
+   818→.btn {
+   819→  display: inline-flex;
+   820→  align-items: center;
+   821→  justify-content: center;
+   822→  gap: 8px;
+   823→  font-family: var(--font);
+   824→  font-size: 0.84rem;
+   825→  font-weight: 600;
+   826→  padding: 10px 20px;
+   827→  border-radius: var(--radius-sm);
+   828→  border: 1px solid transparent;
+   829→  cursor: pointer;
+   830→  transition: background 0.2s ease, border-color 0.2s ease, transform 0.1s ease, box-shadow 0.2s ease;
+   831→  min-height: 42px;
+   832→}
+   833→.btn svg { width: 15px; height: 15px; }
+   834→.btn:active { transform: scale(0.97); }
+   835→.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+   836→
+   837→.btn-primary { background: var(--setup); color: #ffffff; }
+   838→.btn-primary:hover { background: #0d9488; box-shadow: 0 6px 18px rgba(15, 118, 110, 0.25); }
+   839→
+   840→.btn-ghost { background: transparent; color: var(--text-muted); border-color: var(--border-strong); }
+   841→.btn-ghost:hover { color: var(--text); border-color: #b3b8a8; background: var(--surface-2); }
+   842→
+   843→.btn-danger { background: rgba(220, 38, 38, 0.08); color: var(--danger-text); border-color: rgba(220, 38, 38, 0.35); }
+   844→.btn-danger:hover { background: rgba(220, 38, 38, 0.15); color: #991b1b; }
+   845→
+   846→.btn-icon {
+   847→  width: 34px; height: 34px;
+   848→  min-height: 34px;
+   849→  padding: 0;
+   850→  border-radius: 9px;
+   851→  background: rgba(220, 38, 38, 0.08);
+   852→  border: 1px solid rgba(220, 38, 38, 0.3);
+   853→  color: var(--danger-text);
+   854→}
+   855→.btn-icon:hover { background: rgba(220, 38, 38, 0.18); color: #7f1d1d; }
+   856→
+   857→.btn-ghost.btn-icon { background: transparent; border-color: var(--border-strong); color: var(--text-muted); }
+   858→.btn-ghost.btn-icon:hover { color: var(--setup); border-color: var(--setup); background: var(--setup-soft); }
+   859→
+   860→.row-actions { display: inline-flex; gap: 6px; }
+   861→
+   862→/* ---------- ۲۱) مودال‌ها ---------- */
+   863→.modal-overlay {
+   864→  position: fixed;
+   865→  inset: 0;
+   866→  background: rgba(38, 43, 48, 0.45);
+   867→  backdrop-filter: blur(4px);
+   868→  display: grid;
+   869→  place-items: center;
+   870→  z-index: 100;
+   871→  padding: 20px;
+   872→  animation: fadeIn 0.2s ease;
+   873→  overflow-y: auto;
+   874→}
+   875→
+   876→.modal-card {
+   877→  width: 100%;
+   878→  max-width: 460px;
+   879→  background: var(--surface);
+   880→  border: 1px solid var(--border-strong);
+   881→  border-radius: var(--radius);
+   882→  padding: 24px;
+   883→  box-shadow: var(--shadow);
+   884→}
+   885→.modal-card h3 { margin: 0 0 8px; font-size: 1rem; color: var(--text); }
+   886→.modal-msg { margin: 0 0 20px; font-size: 0.84rem; color: var(--text-muted); }
+   887→.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+   888→
+   889→.modal-info-card { max-width: 640px; }
+   890→.modal-info-body { max-height: min(60vh, 560px); overflow-y: auto; }
+   891→
+   892→.confirm-stats {
+   893→  display: grid;
+   894→  gap: 4px;
+   895→  background: var(--bg-soft);
+   896→  border: 1px solid var(--border);
+   897→  border-radius: 10px;
+   898→  padding: 12px 16px;
+   899→  margin-bottom: 10px;
+   900→  font-size: 0.82rem;
+   901→  line-height: 1.9;
+   902→  color: var(--text);
+   903→}
+   904→.confirm-warn {
+   905→  color: var(--danger-text);
+   906→  background: rgba(220, 38, 38, 0.06);
+   907→  border: 1px solid rgba(220, 38, 38, 0.35);
+   908→  border-radius: 10px;
+   909→  padding: 10px 14px;
+   910→  margin-bottom: 10px;
+   911→  font-size: 0.8rem;
+   912→}
+   913→
+   914→/* آمار Audit در مودال اطلاعاتی */
+   915→.audit-stats {
+   916→  display: grid;
+   917→  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+   918→  gap: 8px;
+   919→  background: var(--bg-soft);
+   920→  border: 1px solid var(--border);
+   921→  border-radius: 10px;
+   922→  padding: 12px 16px;
+   923→  margin-bottom: 14px;
+   924→  font-size: 0.8rem;
+   925→  color: var(--text-muted);
+   926→}
+   927→.audit-stats b { color: var(--setup); font-weight: 700; }
+   928→.audit-conflict {
+   929→  grid-column: 1 / -1;
+   930→  color: var(--danger-text);
+   931→  border-top: 1px dashed rgba(220, 38, 38, 0.35);
+   932→  padding-top: 8px;
+   933→}
+   934→.audit-section { margin-bottom: 12px; }
+   935→.audit-section h4 { margin: 0 0 4px; font-size: 0.8rem; color: var(--text-muted); }
+   936→.audit-section p { margin: 0; font-size: 0.78rem; color: var(--text); }
+   937→.audit-peers { margin: 4px 0 0; padding-inline-start: 18px; font-size: 0.75rem; color: var(--text-muted); }
+   938→.audit-formula {
+   939→  background: var(--bg-soft);
+   940→  border: 1px dashed var(--border-strong);
+   941→  border-radius: 10px;
+   942→  padding: 10px 14px;
+   943→  text-align: center;
+   944→  font-size: 0.8rem;
+   945→  font-weight: 600;
+   946→  color: var(--setup);
+   947→}
+   948→
+   949→/* ---------- ۲۲) مودال Drill-down (§8/§9 اصلاحات) ---------- */
+   950→.drill-subtitle {
+   951→  display: flex;
+   952→  align-items: center;
+   953→  gap: 8px;
+   954→  flex-wrap: wrap;
+   955→  font-size: 0.8rem;
+   956→  color: var(--text-muted);
+   957→  margin-bottom: 10px;
+   958→}
+   959→.drill-subtitle b { color: var(--metal); font-weight: 700; }
+   960→
+   961→/* ---------- ۲۳) انتخاب‌گر ستون‌های جزئیات گروه (§7 اصلاحات) ---------- */
+   962→.detail-cols-picker { margin-bottom: 12px; font-size: 0.75rem; }
+   963→.detail-cols-picker summary {
+   964→  cursor: pointer;
+   965→  color: var(--setup);
+   966→  font-weight: 500;
+   967→  padding: 4px 0;
+   968→  user-select: none;
+   969→}
+   970→.detail-cols-picker summary:hover { text-decoration: underline; }
+   971→
+   972→.detail-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+   973→
+   974→.detail-chip {
+   975→  display: inline-flex;
+   976→  align-items: center;
+   977→  gap: 4px;
+   978→  border-radius: 8px;
+   979→  border: 1px solid var(--border);
+   980→  background: var(--surface-2);
+   981→  color: var(--text-muted);
+   982→  font-size: 0.7rem;
+   983→  padding: 2px 4px;
+   984→}
+   985→.detail-chip.on {
+   986→  border-color: rgba(15, 118, 110, 0.4);
+   987→  background: var(--setup-soft);
+   988→  color: var(--text);
+   989→}
+   990→.detail-chip.on b { font-weight: 600; color: var(--setup); }
+   991→
+   992→.detail-chip button {
+   993→  border: none;
+   994→  background: transparent;
+   995→  color: var(--text-faint);
+   996→  cursor: pointer;
+   997→  font-family: var(--font);
+   998→  font-size: 0.72rem;
+   999→  padding: 2px 6px;
+  1000→  border-radius: 6px;
+  1001→}
+  1002→.detail-chip button:hover { color: var(--setup); background: rgba(15, 118, 110, 0.1); }
+  1003→.detail-chip.on button[data-col-off]:hover { color: var(--danger-text); background: rgba(220, 38, 38, 0.1); }
+  1004→
+  1005→/* ---------- ۲۴) پنل Bulk Paste (§4 اصلاحات) ---------- */
+  1006→.bulk-panel .bulk-textarea {
+  1007→  font-family: 'Consolas', 'Courier New', monospace;
+  1008→  font-size: 0.82rem;
+  1009→  line-height: 1.7;
+  1010→  min-height: 130px;
+  1011→  resize: vertical;
+  1012→  white-space: pre;
+  1013→  overflow-x: auto;
+  1014→}
+  1015→
+  1016→.bulk-summary {
+  1017→  font-size: 0.78rem;
+  1018→  color: var(--text-muted);
+  1019→  margin-bottom: 10px;
+  1020→  min-height: 18px;
+  1021→}
+  1022→
+  1023→.bulk-alert {
+  1024→  border: 1px solid rgba(220, 38, 38, 0.35);
+  1025→  background: rgba(220, 38, 38, 0.05);
+  1026→  border-radius: var(--radius-sm);
+  1027→  padding: 10px 14px;
+  1028→  margin-bottom: 10px;
+  1029→  display: grid;
+  1030→  gap: 4px;
+  1031→}
+  1032→
+  1033→.bulk-common-error {
+  1034→  font-size: 0.75rem;
+  1035→  color: var(--danger-text);
+  1036→}
+  1037→
+  1038→.bulk-table td { vertical-align: top; }
+  1039→.bulk-row-error { background: rgba(220, 38, 38, 0.04); }
+  1040→
+  1041→.bulk-errors {
+  1042→  margin: 4px 0 0;
+  1043→  padding-inline-start: 16px;
+  1044→  font-size: 0.68rem;
+  1045→  color: var(--danger-text);
+  1046→  display: grid;
+  1047→  gap: 2px;
+  1048→  white-space: normal;
+  1049→  max-width: 340px;
+  1050→}
+  1051→
+  1052→.bulk-commit { font-weight: 700; }
+  1053→
+  1054→/* ---------- ۲۵) پنل Mapping (§1 اصلاحات) ---------- */
+  1055→.mapping-section {
+  1056→  border: 1px solid var(--border);
+  1057→  border-radius: var(--radius-sm);
+  1058→  background: var(--bg-soft);
+  1059→  padding: 14px 16px;
+  1060→  margin-bottom: 14px;
+  1061→}
+  1062→.mapping-section:last-child { margin-bottom: 0; }
+  1063→
+  1064→.mapping-section-title {
+  1065→  display: flex;
+  1066→  align-items: center;
+  1067→  gap: 10px;
+  1068→  flex-wrap: wrap;
+  1069→  margin: 0 0 10px;
+  1070→  font-size: 0.88rem;
+  1071→  font-weight: 700;
+  1072→  color: var(--text);
+  1073→}
+  1074→
+  1075→.mapping-grid {
+  1076→  display: grid;
+  1077→  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  1078→  gap: 12px;
+  1079→  align-items: start;
+  1080→}
+  1081→
+  1082→.mapping-field select { font-size: 0.8rem; padding: 8px 10px; }
+  1083→.mapping-hint { font-size: 0.65rem; padding: 3px 8px; }
+  1084→
+  1085→/* ---------- ۲۶) Toast ---------- */
+  1086→.toast-stack {
+  1087→  position: fixed;
+  1088→  bottom: 16px;
+  1089→  left: 16px;
+  1090→  display: flex;
+  1091→  flex-direction: column;
+  1092→  gap: 10px;
+  1093→  z-index: 200;
+  1094→  max-width: min(400px, calc(100vw - 32px));
+  1095→}
+  1096→
+  1097→.toast {
+  1098→  display: flex;
+  1099→  align-items: flex-start;
+  1100→  gap: 10px;
+  1101→  background: var(--surface);
+  1102→  border: 1px solid var(--border-strong);
+  1103→  border-radius: var(--radius-sm);
+  1104→  padding: 12px 16px;
+  1105→  font-size: 0.8rem;
+  1106→  color: var(--text);
+  1107→  box-shadow: var(--shadow);
+  1108→  animation: toastIn 0.3s cubic-bezier(0.21, 1.02, 0.73, 1);
+  1109→  cursor: pointer;
+  1110→}
+  1111→.toast.leaving { animation: toastOut 0.25s ease forwards; }
+  1112→
+  1113→.toast svg { width: 18px; height: 18px; flex-shrink: 0; margin-top: 2px; }
+  1114→.toast-success { border-color: rgba(4, 120, 87, 0.4); }
+  1115→.toast-success svg { color: var(--raw); }
+  1116→.toast-error { border-color: rgba(220, 38, 38, 0.45); }
+  1117→.toast-error svg { color: var(--danger); }
+  1118→.toast-warning { border-color: rgba(180, 83, 9, 0.4); }
+  1119→.toast-warning svg { color: var(--metal); }
+  1120→.toast-info svg { color: var(--setup); }
+  1121→
+  1122→@keyframes toastIn {
+  1123→  from { opacity: 0; transform: translateY(16px) scale(0.96); }
+  1124→  to   { opacity: 1; transform: translateY(0) scale(1); }
+  1125→}
+  1126→@keyframes toastOut {
+  1127→  from { opacity: 1; transform: translateY(0); }
+  1128→  to   { opacity: 0; transform: translateY(10px) scale(0.97); }
+  1129→}
+  1130→
+  1131→/* ---------- ۲۷) پاصفحه ---------- */
+  1132→.app-footer {
+  1133→  margin-top: auto;
+  1134→  border-top: 1px solid var(--border);
+  1135→  background: var(--bg-soft);
+  1136→  padding: 14px 20px;
+  1137→  text-align: center;
+  1138→  padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+  1139→}
+  1140→.app-footer p { margin: 0; font-size: 0.7rem; color: var(--text-faint); }
+  1141→
+  1142→/* ---------- ۲۸) حالت خالی ---------- */
+  1143→.empty-state {
+  1144→  text-align: center;
+  1145→  padding: 36px 16px;
+  1146→  color: var(--text-faint);
+  1147→  font-size: 0.84rem;
+  1148→}
+  1149→.empty-state svg { width: 34px; height: 34px; opacity: 0.5; margin-bottom: 8px; }
+  1150→.empty-state h4 { margin: 8px 0 4px; color: var(--text-muted); }
+  1151→.empty-state p { margin: 0; line-height: 2; }
+  1152→.empty-state code { font-size: 0.72rem; }
+  1153→
+  1154→/* ---------- ۲۹) Backup ---------- */
+  1155→.backup-warning {
+  1156→  background: var(--metal-soft);
+  1157→  border: 1px solid rgba(180, 83, 9, 0.35);
+  1158→  border-radius: var(--radius-sm);
+  1159→  padding: 12px 16px;
+  1160→  font-size: 0.78rem;
+  1161→  color: var(--text-muted);
+  1162→  margin-bottom: 14px;
+  1163→  line-height: 2;
+  1164→}
+  1165→.backup-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+  1166→
+  1167→.rules-wrap { margin-top: 16px; }
+  1168→
+  1169→/* ---------- ۳۰) خطای بارگذاری کتابخانه‌ها ---------- */
+  1170→.panel-lib-error {
+  1171→  border-color: rgba(220, 38, 38, 0.5) !important;
+  1172→}
+  1173→.panel-lib-error .section-title { color: var(--danger-text); }
+  1174→.panel-lib-error p { color: var(--text-muted); }
+  1175→
+  1176→/* ---------- ۳۱) واکنش‌گرایی ---------- */
+  1177→@media (max-width: 768px) {
+  1178→  .header-inner { padding: 12px 14px; }
+  1179→  .app-main { padding: 16px 12px 32px; }
+  1180→
+  1181→  .kpi-value { font-size: 2rem; }
+  1182→  .kpi-card { padding: 16px; gap: 12px; }
+  1183→  .kpi-icon { width: 42px; height: 42px; }
+  1184→  .kpi-icon svg { width: 21px; height: 21px; }
+  1185→
+  1186→  .tabs { padding: 0 10px; }
+  1187→  .tab-btn { padding: 9px 12px 11px; font-size: 0.8rem; gap: 6px; }
+  1188→
+  1189→  .form-grid { grid-template-columns: 1fr 1fr; }
+  1190→  .field-actions { grid-column: 1 / -1; }
+  1191→  .rule-grid { grid-template-columns: 1fr 1fr; }
+  1192→
+  1193→  .panel, .formula-card { padding: 16px; }
+  1194→  .settings-grid { grid-template-columns: 1fr; }
+  1195→  .toast-stack { left: 10px; right: 10px; max-width: none; }
+  1196→  .modal-card { padding: 18px; }
+  1197→  .mapping-grid { grid-template-columns: 1fr; }
+  1198→}
+  1199→
+  1200→@media (max-width: 420px) {
+  1201→  .form-grid { grid-template-columns: 1fr; }
+  1202→  .rule-grid { grid-template-columns: 1fr; }
+  1203→  .header-inner { flex-direction: column; align-items: stretch; }
+  1204→  .status-badges { justify-content: center; }
+  1205→  .brand { justify-content: center; }
+  1206→}
+  1207→
+  1208→/* ---------- ۳۲) کاهش حرکت ---------- */
+  1209→@media (prefers-reduced-motion: reduce) {
+  1210→  *, *::before, *::after {
+  1211→    animation-duration: 0.01ms !important;
+  1212→    transition-duration: 0.01ms !important;
+  1213→  }
+  1214→}
+  1215→

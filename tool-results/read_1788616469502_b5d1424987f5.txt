@@ -1,0 +1,1027 @@
+     1→/* =========================================================================
+     2→   سامانهٔ مانیتورینگ صنعتی رول‌ها — استایل اصلی (نسخهٔ ۲)
+     3→   تم صنعتی تیره | RTL | واکنش‌گرا | فونت لوکال وزیرمتن
+     4→   ========================================================================= */
+     5→
+     6→/* ---------- ۱) فونت فارسی (لوکال — آفلاین) ---------- */
+     7→@font-face {
+     8→  font-family: 'Vazirmatn';
+     9→  src: url('lib/fonts/Vazirmatn-Regular.woff2') format('woff2');
+    10→  font-weight: 400;
+    11→  font-display: swap;
+    12→}
+    13→@font-face {
+    14→  font-family: 'Vazirmatn';
+    15→  src: url('lib/fonts/Vazirmatn-Medium.woff2') format('woff2');
+    16→  font-weight: 500;
+    17→  font-display: swap;
+    18→}
+    19→@font-face {
+    20→  font-family: 'Vazirmatn';
+    21→  src: url('lib/fonts/Vazirmatn-Bold.woff2') format('woff2');
+    22→  font-weight: 700;
+    23→  font-display: swap;
+    24→}
+    25→
+    26→/* ---------- ۲) متغیرها ---------- */
+    27→:root {
+    28→  --bg: #09090b;
+    29→  --bg-soft: #101013;
+    30→  --surface: #17171b;
+    31→  --surface-2: #1d1d22;
+    32→  --border: #2a2a31;
+    33→  --border-strong: #3a3a44;
+    34→
+    35→  --text: #f4f4f5;
+    36→  --text-muted: #a1a1aa;
+    37→  --text-faint: #71717a;
+    38→
+    39→  --raw: #34d399;
+    40→  --raw-soft: rgba(52, 211, 153, 0.12);
+    41→  --metal: #fbbf24;
+    42→  --metal-soft: rgba(251, 191, 36, 0.12);
+    43→  --setup: #2dd4bf;
+    44→  --setup-soft: rgba(45, 212, 191, 0.12);
+    45→  --uncut: #fb7185;
+    46→  --uncut-soft: rgba(251, 113, 133, 0.12);
+    47→  --danger: #ef4444;
+    48→
+    49→  --radius: 14px;
+    50→  --radius-sm: 10px;
+    51→  --shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+    52→  --font: 'Vazirmatn', 'Tahoma', 'Segoe UI', sans-serif;
+    53→}
+    54→
+    55→/* ---------- ۳) ریست و پایه ---------- */
+    56→*, *::before, *::after { box-sizing: border-box; }
+    57→
+    58→/* مهم: ویژگی hidden بر هر display غلبه کند (پنجره‌های بسته پنهان بمانند) */
+    59→[hidden] { display: none !important; }
+    60→
+    61→html { scroll-behavior: smooth; }
+    62→
+    63→body {
+    64→  margin: 0;
+    65→  font-family: var(--font);
+    66→  background:
+    67→    radial-gradient(1200px 500px at 85% -10%, rgba(45, 212, 191, 0.07), transparent 60%),
+    68→    radial-gradient(900px 420px at 0% 0%, rgba(251, 191, 36, 0.05), transparent 55%),
+    69→    var(--bg);
+    70→  color: var(--text);
+    71→  line-height: 1.75;
+    72→  min-height: 100vh;
+    73→  -webkit-font-smoothing: antialiased;
+    74→}
+    75→
+    76→::-webkit-scrollbar { width: 10px; height: 10px; }
+    77→::-webkit-scrollbar-track { background: var(--bg-soft); }
+    78→::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 8px; }
+    79→::-webkit-scrollbar-thumb:hover { background: #4b4b57; }
+    80→
+    81→code {
+    82→  font-family: 'Consolas', 'Courier New', monospace;
+    83→  background: var(--surface-2);
+    84→  border: 1px solid var(--border);
+    85→  border-radius: 6px;
+    86→  padding: 0 6px;
+    87→  font-size: 0.85em;
+    88→  color: var(--metal);
+    89→  direction: ltr;
+    90→  display: inline-block;
+    91→}
+    92→
+    93→.muted { color: var(--text-faint); }
+    94→
+    95→:focus-visible {
+    96→  outline: 2px solid var(--setup);
+    97→  outline-offset: 2px;
+    98→  border-radius: 6px;
+    99→}
+   100→
+   101→.sr-only {
+   102→  position: absolute;
+   103→  width: 1px; height: 1px;
+   104→  padding: 0; margin: -1px;
+   105→  overflow: hidden;
+   106→  clip: rect(0 0 0 0);
+   107→  white-space: nowrap;
+   108→  border: 0;
+   109→}
+   110→
+   111→/* ---------- ۴) قالب کلی + پاصفحهٔ چسبیده ---------- */
+   112→.app-shell {
+   113→  display: flex;
+   114→  flex-direction: column;
+   115→  min-height: 100vh;
+   116→}
+   117→
+   118→.app-main {
+   119→  flex: 1;
+   120→  width: 100%;
+   121→  max-width: 1360px;
+   122→  margin: 0 auto;
+   123→  padding: 24px 20px 40px;
+   124→}
+   125→
+   126→/* ---------- ۵) سربرگ ---------- */
+   127→.app-header {
+   128→  background: rgba(23, 23, 27, 0.85);
+   129→  backdrop-filter: blur(12px);
+   130→  border-bottom: 1px solid var(--border);
+   131→  position: sticky;
+   132→  top: 0;
+   133→  z-index: 50;
+   134→}
+   135→
+   136→.header-inner {
+   137→  max-width: 1360px;
+   138→  margin: 0 auto;
+   139→  padding: 14px 20px;
+   140→  display: flex;
+   141→  align-items: center;
+   142→  justify-content: space-between;
+   143→  gap: 16px;
+   144→  flex-wrap: wrap;
+   145→}
+   146→
+   147→.brand { display: flex; align-items: center; gap: 12px; }
+   148→
+   149→.brand-icon {
+   150→  width: 46px; height: 46px;
+   151→  display: grid; place-items: center;
+   152→  border-radius: 12px;
+   153→  color: var(--setup);
+   154→  background: var(--setup-soft);
+   155→  border: 1px solid rgba(45, 212, 191, 0.25);
+   156→  flex-shrink: 0;
+   157→}
+   158→.brand-icon svg { width: 26px; height: 26px; }
+   159→
+   160→.brand-text h1 { margin: 0; font-size: 1.1rem; font-weight: 700; }
+   161→.brand-text p { margin: 0; font-size: 0.75rem; color: var(--text-muted); }
+   162→
+   163→.status-badges { display: flex; gap: 8px; flex-wrap: wrap; }
+   164→
+   165→.badge {
+   166→  display: inline-flex;
+   167→  align-items: center;
+   168→  gap: 6px;
+   169→  font-size: 0.72rem;
+   170→  font-weight: 500;
+   171→  padding: 5px 12px;
+   172→  border-radius: 999px;
+   173→  border: 1px solid var(--border);
+   174→  background: var(--surface);
+   175→  color: var(--text-muted);
+   176→}
+   177→.badge-offline { color: var(--raw); border-color: rgba(52, 211, 153, 0.3); background: var(--raw-soft); }
+   178→.badge-db.ok { color: var(--raw); border-color: rgba(52, 211, 153, 0.3); }
+   179→.badge-db.err { color: var(--danger); border-color: rgba(239, 68, 68, 0.4); }
+   180→
+   181→/* ---------- ۶) تب‌های اصلی و داخلی ---------- */
+   182→.tabs {
+   183→  max-width: 1360px;
+   184→  margin: 0 auto;
+   185→  padding: 0 20px;
+   186→  display: flex;
+   187→  gap: 4px;
+   188→  overflow-x: auto;
+   189→}
+   190→
+   191→.tab-btn {
+   192→  position: relative;
+   193→  display: inline-flex;
+   194→  align-items: center;
+   195→  gap: 8px;
+   196→  padding: 10px 16px 12px;
+   197→  background: none;
+   198→  border: none;
+   199→  border-bottom: 2px solid transparent;
+   200→  color: var(--text-muted);
+   201→  font-family: var(--font);
+   202→  font-size: 0.88rem;
+   203→  font-weight: 500;
+   204→  cursor: pointer;
+   205→  white-space: nowrap;
+   206→  transition: color 0.2s ease, border-color 0.2s ease;
+   207→}
+   208→.tab-btn svg { width: 16px; height: 16px; }
+   209→.tab-btn:hover { color: var(--text); }
+   210→.tab-btn.active { color: var(--setup); border-bottom-color: var(--setup); }
+   211→
+   212→.subtabs {
+   213→  display: flex;
+   214→  gap: 6px;
+   215→  margin-bottom: 16px;
+   216→  border-bottom: 1px solid var(--border);
+   217→  padding-bottom: 0;
+   218→}
+   219→
+   220→.subtab-btn {
+   221→  padding: 8px 18px;
+   222→  background: none;
+   223→  border: none;
+   224→  border-bottom: 2px solid transparent;
+   225→  color: var(--text-muted);
+   226→  font-family: var(--font);
+   227→  font-size: 0.85rem;
+   228→  font-weight: 500;
+   229→  cursor: pointer;
+   230→}
+   231→.subtab-btn.active { color: var(--raw); border-bottom-color: var(--raw); }
+   232→
+   233→.subview { display: none; animation: fadeIn 0.3s ease; }
+   234→.subview.active { display: block; }
+   235→
+   236→.view { display: none; animation: fadeIn 0.35s ease; }
+   237→.view.active { display: block; }
+   238→
+   239→@keyframes fadeIn {
+   240→  from { opacity: 0; transform: translateY(8px); }
+   241→  to   { opacity: 1; transform: translateY(0); }
+   242→}
+   243→
+   244→/* ---------- ۷) کارت‌های KPI ---------- */
+   245→.kpi-grid {
+   246→  display: grid;
+   247→  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+   248→  gap: 18px;
+   249→  margin-bottom: 22px;
+   250→}
+   251→
+   252→.kpi-card {
+   253→  position: relative;
+   254→  overflow: hidden;
+   255→  background: linear-gradient(160deg, var(--surface) 0%, var(--surface-2) 100%);
+   256→  border: 1px solid var(--border);
+   257→  border-radius: var(--radius);
+   258→  padding: 20px;
+   259→  display: flex;
+   260→  gap: 16px;
+   261→  align-items: flex-start;
+   262→  transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+   263→}
+   264→.kpi-card:hover { transform: translateY(-4px); box-shadow: var(--shadow); border-color: var(--border-strong); }
+   265→.kpi-card::before { content: ''; position: absolute; top: 0; right: 0; left: 0; height: 3px; }
+   266→
+   267→.kpi-raw::before        { background: var(--raw); }
+   268→.kpi-metallized::before { background: var(--metal); }
+   269→.kpi-setup::before      { background: var(--setup); }
+   270→.kpi-uncut::before      { background: var(--uncut); }
+   271→
+   272→.kpi-icon { width: 48px; height: 48px; border-radius: 12px; display: grid; place-items: center; flex-shrink: 0; }
+   273→.kpi-icon svg { width: 25px; height: 25px; }
+   274→
+   275→.kpi-raw .kpi-icon        { color: var(--raw);   background: var(--raw-soft); }
+   276→.kpi-metallized .kpi-icon { color: var(--metal); background: var(--metal-soft); }
+   277→.kpi-setup .kpi-icon      { color: var(--setup); background: var(--setup-soft); }
+   278→.kpi-uncut .kpi-icon      { color: var(--uncut); background: var(--uncut-soft); }
+   279→
+   280→.kpi-body { min-width: 0; flex: 1; }
+   281→.kpi-title { margin: 0 0 2px; font-size: 0.88rem; font-weight: 500; color: var(--text-muted); }
+   282→.kpi-value { font-size: 2.5rem; font-weight: 700; line-height: 1.25; letter-spacing: -1px; }
+   283→
+   284→.kpi-raw .kpi-value        { color: var(--raw); }
+   285→.kpi-metallized .kpi-value { color: var(--metal); }
+   286→.kpi-setup .kpi-value      { color: var(--setup); }
+   287→.kpi-uncut .kpi-value      { color: var(--uncut); }
+   288→
+   289→.kpi-desc { margin: 4px 0 0; font-size: 0.72rem; color: var(--text-faint); }
+   290→.kpi-meta {
+   291→  margin: 8px 0 0;
+   292→  font-size: 0.72rem;
+   293→  color: var(--text-muted);
+   294→  border-top: 1px dashed var(--border);
+   295→  padding-top: 8px;
+   296→}
+   297→.kpi-file { margin: 4px 0 0; font-size: 0.68rem; color: var(--text-faint); }
+   298→
+   299→.kpi-card.negative { border-color: rgba(239, 68, 68, 0.5); }
+   300→.kpi-card.negative::before { background: var(--danger); }
+   301→.kpi-card.negative .kpi-value { color: var(--danger); animation: pulse 1.6s ease infinite; }
+   302→
+   303→@keyframes pulse {
+   304→  0%, 100% { opacity: 1; }
+   305→  50%      { opacity: 0.55; }
+   306→}
+   307→
+   308→/* ---------- ۸) پنل‌ها ---------- */
+   309→.formula-card, .panel, .notice-panel, .alerts-panel {
+   310→  background: var(--surface);
+   311→  border: 1px solid var(--border);
+   312→  border-radius: var(--radius);
+   313→  padding: 20px;
+   314→  margin-bottom: 18px;
+   315→}
+   316→
+   317→.section-title {
+   318→  display: flex;
+   319→  align-items: center;
+   320→  gap: 8px;
+   321→  margin: 0 0 14px;
+   322→  font-size: 0.95rem;
+   323→  font-weight: 700;
+   324→  flex-wrap: wrap;
+   325→}
+   326→.section-title svg { width: 18px; height: 18px; color: var(--text-muted); }
+   327→
+   328→.formula-box {
+   329→  background: var(--bg-soft);
+   330→  border: 1px dashed var(--border-strong);
+   331→  border-radius: var(--radius-sm);
+   332→  padding: 14px 18px;
+   333→  text-align: center;
+   334→  font-weight: 700;
+   335→  font-size: 0.95rem;
+   336→  color: var(--setup);
+   337→  margin-bottom: 12px;
+   338→}
+   339→.formula-box.negative { color: var(--danger); border-color: rgba(239, 68, 68, 0.5); }
+   340→
+   341→.formula-notes, .tips-list {
+   342→  margin: 0;
+   343→  padding-inline-start: 20px;
+   344→  color: var(--text-muted);
+   345→  font-size: 0.8rem;
+   346→  display: grid;
+   347→  gap: 6px;
+   348→}
+   349→
+   350→.import-grid {
+   351→  display: grid;
+   352→  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+   353→  gap: 18px;
+   354→}
+   355→
+   356→.settings-grid {
+   357→  display: grid;
+   358→  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+   359→  gap: 18px;
+   360→  align-items: start;
+   361→}
+   362→
+   363→.panel-head { margin-bottom: 14px; }
+   364→.panel-head-row {
+   365→  display: flex;
+   366→  align-items: center;
+   367→  justify-content: space-between;
+   368→  gap: 12px;
+   369→  flex-wrap: wrap;
+   370→}
+   371→
+   372→.panel-head h3 {
+   373→  display: flex;
+   374→  align-items: center;
+   375→  gap: 10px;
+   376→  margin: 0;
+   377→  font-size: 0.98rem;
+   378→  font-weight: 700;
+   379→  flex-wrap: wrap;
+   380→}
+   381→
+   382→.panel-icon { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; flex-shrink: 0; }
+   383→.panel-icon svg { width: 18px; height: 18px; }
+   384→.icon-raw   { color: var(--raw);   background: var(--raw-soft); }
+   385→.icon-metal { color: var(--metal); background: var(--metal-soft); }
+   386→.icon-setup { color: var(--setup); background: var(--setup-soft); }
+   387→
+   388→.panel-desc { margin: 6px 0 0; font-size: 0.78rem; color: var(--text-muted); }
+   389→.file-hint { font-size: 0.7rem; padding: 2px 8px; }
+   390→
+   391→/* ---------- ۹) مرکز هشدار (§52) ---------- */
+   392→.alerts-list { display: grid; gap: 10px; max-height: 340px; overflow-y: auto; padding-inline-end: 4px; }
+   393→
+   394→.alert-item {
+   395→  display: flex;
+   396→  align-items: flex-start;
+   397→  gap: 10px;
+   398→  border-radius: var(--radius-sm);
+   399→  border: 1px solid var(--border);
+   400→  padding: 10px 14px;
+   401→  background: var(--bg-soft);
+   402→  animation: fadeIn 0.3s ease;
+   403→}
+   404→.alert-item .alert-body { flex: 1; min-width: 0; }
+   405→.alert-item b { display: block; font-size: 0.82rem; }
+   406→.alert-item p { margin: 2px 0 0; font-size: 0.75rem; color: var(--text-muted); }
+   407→
+   408→.alert-badge {
+   409→  flex-shrink: 0;
+   410→  font-size: 0.68rem;
+   411→  font-weight: 700;
+   412→  padding: 2px 10px;
+   413→  border-radius: 999px;
+   414→}
+   415→.alert-error   { border-color: rgba(239, 68, 68, 0.45); }
+   416→.alert-error .alert-badge   { background: rgba(239, 68, 68, 0.18); color: #fda4af; }
+   417→.alert-warning { border-color: rgba(251, 191, 36, 0.4); }
+   418→.alert-warning .alert-badge { background: var(--metal-soft); color: var(--metal); }
+   419→
+   420→.alert-item .btn { flex-shrink: 0; }
+   421→
+   422→/* ---------- ۱۰) Dropzone و وضعیت Import ---------- */
+   423→.dropzone {
+   424→  border: 2px dashed var(--border-strong);
+   425→  border-radius: var(--radius-sm);
+   426→  background: var(--bg-soft);
+   427→  padding: 26px 16px;
+   428→  text-align: center;
+   429→  cursor: pointer;
+   430→  transition: border-color 0.2s ease, background 0.2s ease, transform 0.15s ease;
+   431→  user-select: none;
+   432→}
+   433→.dropzone svg { width: 30px; height: 30px; color: var(--text-faint); margin-bottom: 6px; }
+   434→.dropzone p { margin: 0; font-size: 0.85rem; color: var(--text-muted); }
+   435→.dropzone .drop-hint { margin-top: 6px; font-size: 0.7rem; color: var(--text-faint); }
+   436→
+   437→.dropzone:hover, .dropzone:focus-visible, .dropzone.dragover {
+   438→  border-color: var(--setup);
+   439→  background: var(--setup-soft);
+   440→  transform: scale(1.01);
+   441→}
+   442→.dropzone.dragover svg, .dropzone:hover svg { color: var(--setup); }
+   443→.dropzone.loading { pointer-events: none; opacity: 0.6; }
+   444→
+   445→.import-status {
+   446→  margin-top: 14px;
+   447→  border-radius: var(--radius-sm);
+   448→  border: 1px solid var(--border);
+   449→  background: var(--bg-soft);
+   450→  padding: 12px 16px;
+   451→  font-size: 0.78rem;
+   452→  color: var(--text-muted);
+   453→}
+   454→.import-status .status-empty { margin: 0; color: var(--text-faint); }
+   455→.import-status.ok  { border-color: rgba(52, 211, 153, 0.4); }
+   456→.import-status.err { border-color: rgba(239, 68, 68, 0.5); }
+   457→
+   458→.status-row {
+   459→  display: flex;
+   460→  align-items: center;
+   461→  gap: 8px;
+   462→  margin: 2px 0;
+   463→  flex-wrap: wrap;
+   464→}
+   465→.status-row b { color: var(--text); font-weight: 600; }
+   466→.status-row .num, .num { color: var(--setup); font-weight: 700; }
+   467→.status-row .num-warn { color: var(--metal); font-weight: 700; }
+   468→.status-row.muted { color: var(--text-faint); font-size: 0.72rem; }
+   469→
+   470→.status-icon { width: 15px; height: 15px; flex-shrink: 0; display: inline-grid; place-items: center; }
+   471→.status-icon svg { width: 15px; height: 15px; }
+   472→.status-icon.ok { color: var(--raw); }
+   473→.status-icon.err { color: var(--metal); }
+   474→
+   475→/* گزارشنمای Import (§11) */
+   476→.report-grid {
+   477→  display: grid;
+   478→  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+   479→  gap: 4px 12px;
+   480→  margin: 8px 0;
+   481→  padding: 8px 10px;
+   482→  border-radius: 8px;
+   483→  background: var(--surface);
+   484→}
+   485→
+   486→.import-preview { margin-top: 12px; }
+   487→.import-preview summary {
+   488→  cursor: pointer;
+   489→  font-size: 0.78rem;
+   490→  color: var(--setup);
+   491→  font-weight: 500;
+   492→  padding: 4px 0;
+   493→  user-select: none;
+   494→}
+   495→.import-preview summary:hover { text-decoration: underline; }
+   496→
+   497→/* ---------- ۱۱) جدول‌ها ---------- */
+   498→.table-wrap { overflow-x: auto; border-radius: var(--radius-sm); border: 1px solid var(--border); }
+   499→.table-scroll { max-height: 480px; overflow-y: auto; }
+   500→
+   501→.data-table { width: 100%; border-collapse: collapse; font-size: 0.78rem; background: var(--bg-soft); }
+   502→.data-table th, .data-table td {
+   503→  padding: 9px 12px;
+   504→  text-align: right;
+   505→  border-bottom: 1px solid var(--border);
+   506→  white-space: nowrap;
+   507→}
+   508→.data-table thead th {
+   509→  position: sticky;
+   510→  top: 0;
+   511→  z-index: 2;
+   512→  background: var(--surface-2);
+   513→  color: var(--text-muted);
+   514→  font-weight: 600;
+   515→  font-size: 0.73rem;
+   516→}
+   517→.data-table tbody tr:hover { background: rgba(45, 212, 191, 0.04); }
+   518→.data-table td.ltr { direction: ltr; text-align: left; font-family: 'Consolas', monospace; font-size: 0.72rem; }
+   519→.data-table .film-r { color: var(--raw); font-weight: 700; }
+   520→.data-table .film-bad { color: var(--danger); }
+   521→.data-table .count-cell { color: var(--metal); font-weight: 700; font-size: 0.88rem; }
+   522→.data-table .thickness-cell { color: var(--setup); font-weight: 600; }
+   523→.data-table tr.group-boundary td { border-top: 2px solid var(--border-strong); }
+   524→
+   525→.data-table td.num-raw   { color: var(--raw); font-weight: 700; }
+   526→.data-table td.num-metal { color: var(--metal); font-weight: 700; }
+   527→.data-table td.num-uncut { color: var(--uncut); font-weight: 700; }
+   528→
+   529→/* ---------- ۱۲) صفحه‌بندی ---------- */
+   530→.pager {
+   531→  display: flex;
+   532→  align-items: center;
+   533→  justify-content: center;
+   534→  gap: 8px;
+   535→  flex-wrap: wrap;
+   536→  padding: 12px 8px 4px;
+   537→}
+   538→.pager-info { font-size: 0.72rem; color: var(--text-muted); }
+   539→.btn-sm { padding: 6px 12px; font-size: 0.75rem; min-height: 34px; }
+   540→
+   541→/* ---------- ۱۳) سازندهٔ مرتب‌سازی (§36-§38) ---------- */
+   542→.sort-builder {
+   543→  border: 1px solid var(--border);
+   544→  border-radius: var(--radius-sm);
+   545→  background: var(--bg-soft);
+   546→  padding: 12px 14px;
+   547→  margin-bottom: 16px;
+   548→}
+   549→.sort-builder-head {
+   550→  display: flex;
+   551→  align-items: center;
+   552→  gap: 10px;
+   553→  flex-wrap: wrap;
+   554→  margin-bottom: 10px;
+   555→  font-size: 0.8rem;
+   556→}
+   557→
+   558→.sort-pipeline { display: flex; gap: 8px; flex-wrap: wrap; min-height: 34px; align-items: center; }
+   559→
+   560→.sort-chip {
+   561→  display: inline-flex;
+   562→  align-items: center;
+   563→  gap: 6px;
+   564→  background: var(--surface-2);
+   565→  border: 1px solid var(--border-strong);
+   566→  border-radius: 999px;
+   567→  padding: 4px 6px 4px 12px;
+   568→  font-size: 0.75rem;
+   569→  cursor: grab;
+   570→  transition: border-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
+   571→  user-select: none;
+   572→}
+   573→.sort-chip:hover { border-color: var(--setup); }
+   574→.sort-chip.dragging { opacity: 0.5; cursor: grabbing; transform: scale(0.97); }
+   575→.sort-chip.drag-over { border-color: var(--setup); box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.2); }
+   576→
+   577→.sort-chip .grip { color: var(--text-faint); display: inline-grid; place-items: center; }
+   578→.sort-chip .grip svg { width: 13px; height: 13px; }
+   579→
+   580→.sort-priority {
+   581→  width: 20px; height: 20px;
+   582→  display: grid; place-items: center;
+   583→  background: var(--setup-soft);
+   584→  color: var(--setup);
+   585→  border-radius: 50%;
+   586→  font-size: 0.65rem;
+   587→  font-weight: 700;
+   588→}
+   589→
+   590→.sort-label { font-weight: 500; }
+   591→
+   592→.sort-dir {
+   593→  width: 24px; height: 24px;
+   594→  border-radius: 6px;
+   595→  border: 1px solid var(--border-strong);
+   596→  background: var(--bg-soft);
+   597→  color: var(--text-muted);
+   598→  font-size: 0.8rem;
+   599→  font-weight: 700;
+   600→  cursor: pointer;
+   601→  font-family: var(--font);
+   602→}
+   603→.sort-dir.asc { color: var(--raw); }
+   604→.sort-dir.desc { color: var(--metal); }
+   605→.sort-dir:hover { border-color: var(--setup); color: var(--text); }
+   606→
+   607→.sort-remove {
+   608→  width: 22px; height: 22px;
+   609→  border: none;
+   610→  background: none;
+   611→  color: var(--text-faint);
+   612→  cursor: pointer;
+   613→  display: grid; place-items: center;
+   614→  border-radius: 6px;
+   615→}
+   616→.sort-remove svg { width: 12px; height: 12px; }
+   617→.sort-remove:hover { color: var(--danger); background: rgba(239, 68, 68, 0.12); }
+   618→
+   619→.sort-add-row { display: flex; gap: 8px; margin-top: 10px; align-items: center; flex-wrap: wrap; }
+   620→.sort-add-select {
+   621→  font-family: var(--font);
+   622→  font-size: 0.78rem;
+   623→  color: var(--text);
+   624→  background: var(--surface-2);
+   625→  border: 1px solid var(--border-strong);
+   626→  border-radius: var(--radius-sm);
+   627→  padding: 7px 12px;
+   628→}
+   629→
+   630→/* ---------- ۱۴) وضعیت تطبیق گروه‌ها ---------- */
+   631→.status-pill {
+   632→  display: inline-block;
+   633→  font-size: 0.7rem;
+   634→  font-weight: 600;
+   635→  padding: 2px 10px;
+   636→  border-radius: 999px;
+   637→  white-space: nowrap;
+   638→}
+   639→.pill-ok     { background: var(--raw-soft); color: var(--raw); border: 1px solid rgba(52, 211, 153, 0.3); }
+   640→.pill-warn   { background: var(--metal-soft); color: var(--metal); border: 1px solid rgba(251, 191, 36, 0.3); }
+   641→.pill-muted  { background: var(--surface-2); color: var(--text-faint); border: 1px solid var(--border); }
+   642→
+   643→/* ---------- ۱۵) چیپ‌ها ---------- */
+   644→.panel-tools { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+   645→
+   646→.chip {
+   647→  font-size: 0.7rem;
+   648→  padding: 4px 12px;
+   649→  border-radius: 999px;
+   650→  background: var(--bg-soft);
+   651→  border: 1px solid var(--border);
+   652→  color: var(--text-muted);
+   653→}
+   654→.chip-strong { color: var(--metal); border-color: rgba(251, 191, 36, 0.35); background: var(--metal-soft); font-weight: 700; }
+   655→.chip-ok     { color: var(--raw); border-color: rgba(52, 211, 153, 0.35); background: var(--raw-soft); }
+   656→.chip-warn   { color: var(--metal); border-color: rgba(251, 191, 36, 0.4); background: var(--metal-soft); font-weight: 600; }
+   657→
+   658→/* ---------- ۱۶) فرم‌ها ---------- */
+   659→.form-grid {
+   660→  display: grid;
+   661→  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+   662→  gap: 14px;
+   663→  align-items: start;
+   664→}
+   665→
+   666→.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+   667→.field-wide { grid-column: 1 / -1; }
+   668→.field label { font-size: 0.78rem; font-weight: 500; color: var(--text-muted); }
+   669→.field .req { color: var(--uncut); }
+   670→.field .unit { color: var(--text-faint); font-weight: 400; font-size: 0.7rem; }
+   671→
+   672→.field input, .field select {
+   673→  font-family: var(--font);
+   674→  font-size: 0.88rem;
+   675→  color: var(--text);
+   676→  background: var(--bg-soft);
+   677→  border: 1px solid var(--border-strong);
+   678→  border-radius: var(--radius-sm);
+   679→  padding: 10px 14px;
+   680→  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+   681→  width: 100%;
+   682→}
+   683→.field input::placeholder { color: var(--text-faint); }
+   684→.field input:hover, .field select:hover { border-color: #4b4b57; }
+   685→.field input:focus, .field select:focus {
+   686→  outline: none;
+   687→  border-color: var(--setup);
+   688→  box-shadow: 0 0 0 3px rgba(45, 212, 191, 0.15);
+   689→}
+   690→.field input:disabled {
+   691→  opacity: 0.55;
+   692→  cursor: not-allowed;
+   693→  background: var(--surface);
+   694→  border-style: dashed;
+   695→}
+   696→.field input.invalid, .field select.invalid {
+   697→  border-color: var(--danger);
+   698→  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+   699→}
+   700→
+   701→.field-error { margin: 0; font-size: 0.68rem; color: #fda4af; }
+   702→.field-hint {
+   703→  margin: 0;
+   704→  font-size: 0.68rem;
+   705→  color: var(--setup);
+   706→  background: var(--setup-soft);
+   707→  border: 1px dashed rgba(45, 212, 191, 0.35);
+   708→  border-radius: 8px;
+   709→  padding: 5px 10px;
+   710→}
+   711→
+   712→.field-actions { display: flex; gap: 10px; align-items: flex-end; padding-top: 4px; flex-wrap: wrap; }
+   713→
+   714→.rule-grid {
+   715→  display: grid;
+   716→  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+   717→  gap: 12px;
+   718→  align-items: start;
+   719→}
+   720→
+   721→/* ---------- ۱۷) بازخورد زندهٔ الگوی برش (§29) ---------- */
+   722→.pattern-feedback {
+   723→  margin-top: 4px;
+   724→  font-size: 0.72rem;
+   725→  border-radius: 8px;
+   726→  padding: 6px 12px;
+   727→  border: 1px dashed var(--border-strong);
+   728→  color: var(--text-muted);
+   729→  min-height: 30px;
+   730→}
+   731→.pattern-feedback.valid   { border-color: rgba(52, 211, 153, 0.45); color: var(--raw); background: var(--raw-soft); }
+   732→.pattern-feedback.invalid { border-color: rgba(239, 68, 68, 0.5); color: #fda4af; background: rgba(239, 68, 68, 0.08); }
+   733→.pattern-feedback b { font-weight: 700; }
+   734→
+   735→.pf-status { font-weight: 700; }
+   736→
+   737→/* ---------- ۱۸) کارت‌های الگوی برش در جدول (§30) ---------- */
+   738→.pattern-cards { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+   739→
+   740→.pattern-card {
+   741→  display: inline-grid;
+   742→  place-items: center;
+   743→  min-width: 46px;
+   744→  padding: 3px 8px;
+   745→  border-radius: 8px;
+   746→  border: 1px solid rgba(45, 212, 191, 0.35);
+   747→  background: var(--setup-soft);
+   748→  color: var(--setup);
+   749→  font-size: 0.72rem;
+   750→  font-weight: 700;
+   751→  font-family: 'Vazirmatn', sans-serif;
+   752→}
+   753→
+   754→.pattern-sum {
+   755→  font-size: 0.66rem;
+   756→  color: var(--text-faint);
+   757→  margin-top: 3px;
+   758→  white-space: nowrap;
+   759→}
+   760→
+   761→/* ---------- ۱۹) نشان مغایرت ظرفیت (§86) ---------- */
+   762→.conflict-badge {
+   763→  display: inline-block;
+   764→  margin-inline-start: 6px;
+   765→  font-size: 0.65rem;
+   766→  font-weight: 700;
+   767→  color: #fda4af;
+   768→  background: rgba(239, 68, 68, 0.15);
+   769→  border: 1px solid rgba(239, 68, 68, 0.4);
+   770→  border-radius: 999px;
+   771→  padding: 1px 8px;
+   772→  animation: pulse 1.8s ease infinite;
+   773→  white-space: nowrap;
+   774→}
+   775→
+   776→/* ---------- ۲۰) دکمه‌ها ---------- */
+   777→.btn {
+   778→  display: inline-flex;
+   779→  align-items: center;
+   780→  justify-content: center;
+   781→  gap: 8px;
+   782→  font-family: var(--font);
+   783→  font-size: 0.84rem;
+   784→  font-weight: 600;
+   785→  padding: 10px 20px;
+   786→  border-radius: var(--radius-sm);
+   787→  border: 1px solid transparent;
+   788→  cursor: pointer;
+   789→  transition: background 0.2s ease, border-color 0.2s ease, transform 0.1s ease, box-shadow 0.2s ease;
+   790→  min-height: 42px;
+   791→}
+   792→.btn svg { width: 15px; height: 15px; }
+   793→.btn:active { transform: scale(0.97); }
+   794→.btn:disabled { opacity: 0.45; cursor: not-allowed; }
+   795→
+   796→.btn-primary { background: var(--setup); color: #04211e; }
+   797→.btn-primary:hover { background: #45e0cc; box-shadow: 0 6px 18px rgba(45, 212, 191, 0.25); }
+   798→
+   799→.btn-ghost { background: transparent; color: var(--text-muted); border-color: var(--border-strong); }
+   800→.btn-ghost:hover { color: var(--text); border-color: #4b4b57; background: var(--surface); }
+   801→
+   802→.btn-danger { background: rgba(239, 68, 68, 0.12); color: #fda4af; border-color: rgba(239, 68, 68, 0.35); }
+   803→.btn-danger:hover { background: rgba(239, 68, 68, 0.22); color: #fecaca; }
+   804→
+   805→.btn-icon {
+   806→  width: 34px; height: 34px;
+   807→  min-height: 34px;
+   808→  padding: 0;
+   809→  border-radius: 9px;
+   810→  background: rgba(239, 68, 68, 0.1);
+   811→  border: 1px solid rgba(239, 68, 68, 0.3);
+   812→  color: #fda4af;
+   813→}
+   814→.btn-icon:hover { background: rgba(239, 68, 68, 0.25); color: #fff; }
+   815→
+   816→.btn-ghost.btn-icon { background: transparent; border-color: var(--border-strong); color: var(--text-muted); }
+   817→.btn-ghost.btn-icon:hover { color: var(--setup); border-color: var(--setup); background: var(--setup-soft); }
+   818→
+   819→.row-actions { display: inline-flex; gap: 6px; }
+   820→
+   821→/* ---------- ۲۱) مودال‌ها ---------- */
+   822→.modal-overlay {
+   823→  position: fixed;
+   824→  inset: 0;
+   825→  background: rgba(0, 0, 0, 0.65);
+   826→  backdrop-filter: blur(4px);
+   827→  display: grid;
+   828→  place-items: center;
+   829→  z-index: 100;
+   830→  padding: 20px;
+   831→  animation: fadeIn 0.2s ease;
+   832→  overflow-y: auto;
+   833→}
+   834→
+   835→.modal-card {
+   836→  width: 100%;
+   837→  max-width: 460px;
+   838→  background: var(--surface);
+   839→  border: 1px solid var(--border-strong);
+   840→  border-radius: var(--radius);
+   841→  padding: 24px;
+   842→  box-shadow: var(--shadow);
+   843→}
+   844→.modal-card h3 { margin: 0 0 8px; font-size: 1rem; }
+   845→.modal-msg { margin: 0 0 20px; font-size: 0.84rem; color: var(--text-muted); }
+   846→.modal-actions { display: flex; justify-content: flex-end; gap: 10px; }
+   847→
+   848→.modal-info-card { max-width: 640px; }
+   849→.modal-info-body { max-height: min(60vh, 560px); overflow-y: auto; }
+   850→
+   851→.confirm-stats {
+   852→  display: grid;
+   853→  gap: 4px;
+   854→  background: var(--bg-soft);
+   855→  border: 1px solid var(--border);
+   856→  border-radius: 10px;
+   857→  padding: 12px 16px;
+   858→  margin-bottom: 10px;
+   859→  font-size: 0.82rem;
+   860→  line-height: 1.9;
+   861→}
+   862→.confirm-warn {
+   863→  color: #fda4af;
+   864→  background: rgba(239, 68, 68, 0.08);
+   865→  border: 1px solid rgba(239, 68, 68, 0.35);
+   866→  border-radius: 10px;
+   867→  padding: 10px 14px;
+   868→  margin-bottom: 10px;
+   869→  font-size: 0.8rem;
+   870→}
+   871→
+   872→/* آمار Audit در مودال اطلاعاتی */
+   873→.audit-stats {
+   874→  display: grid;
+   875→  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+   876→  gap: 8px;
+   877→  background: var(--bg-soft);
+   878→  border: 1px solid var(--border);
+   879→  border-radius: 10px;
+   880→  padding: 12px 16px;
+   881→  margin-bottom: 14px;
+   882→  font-size: 0.8rem;
+   883→}
+   884→.audit-stats b { color: var(--setup); font-weight: 700; }
+   885→.audit-conflict {
+   886→  grid-column: 1 / -1;
+   887→  color: #fda4af;
+   888→  border-top: 1px dashed rgba(239, 68, 68, 0.35);
+   889→  padding-top: 8px;
+   890→}
+   891→.audit-section { margin-bottom: 12px; }
+   892→.audit-section h4 { margin: 0 0 4px; font-size: 0.8rem; color: var(--text-muted); }
+   893→.audit-section p { margin: 0; font-size: 0.78rem; }
+   894→.audit-peers { margin: 4px 0 0; padding-inline-start: 18px; font-size: 0.75rem; color: var(--text-muted); }
+   895→.audit-formula {
+   896→  background: var(--bg-soft);
+   897→  border: 1px dashed var(--border-strong);
+   898→  border-radius: 10px;
+   899→  padding: 10px 14px;
+   900→  text-align: center;
+   901→  font-size: 0.8rem;
+   902→  font-weight: 600;
+   903→  color: var(--setup);
+   904→}
+   905→
+   906→/* ---------- ۲۲) Toast ---------- */
+   907→.toast-stack {
+   908→  position: fixed;
+   909→  bottom: 16px;
+   910→  left: 16px;
+   911→  display: flex;
+   912→  flex-direction: column;
+   913→  gap: 10px;
+   914→  z-index: 200;
+   915→  max-width: min(400px, calc(100vw - 32px));
+   916→}
+   917→
+   918→.toast {
+   919→  display: flex;
+   920→  align-items: flex-start;
+   921→  gap: 10px;
+   922→  background: var(--surface-2);
+   923→  border: 1px solid var(--border-strong);
+   924→  border-radius: var(--radius-sm);
+   925→  padding: 12px 16px;
+   926→  font-size: 0.8rem;
+   927→  box-shadow: var(--shadow);
+   928→  animation: toastIn 0.3s cubic-bezier(0.21, 1.02, 0.73, 1);
+   929→  cursor: pointer;
+   930→}
+   931→.toast.leaving { animation: toastOut 0.25s ease forwards; }
+   932→
+   933→.toast svg { width: 18px; height: 18px; flex-shrink: 0; margin-top: 2px; }
+   934→.toast-success { border-color: rgba(52, 211, 153, 0.45); }
+   935→.toast-success svg { color: var(--raw); }
+   936→.toast-error { border-color: rgba(239, 68, 68, 0.5); }
+   937→.toast-error svg { color: var(--danger); }
+   938→.toast-warning { border-color: rgba(251, 191, 36, 0.45); }
+   939→.toast-warning svg { color: var(--metal); }
+   940→.toast-info svg { color: var(--setup); }
+   941→
+   942→@keyframes toastIn {
+   943→  from { opacity: 0; transform: translateY(16px) scale(0.96); }
+   944→  to   { opacity: 1; transform: translateY(0) scale(1); }
+   945→}
+   946→@keyframes toastOut {
+   947→  from { opacity: 1; transform: translateY(0); }
+   948→  to   { opacity: 0; transform: translateY(10px) scale(0.97); }
+   949→}
+   950→
+   951→/* ---------- ۲۳) پاصفحه ---------- */
+   952→.app-footer {
+   953→  margin-top: auto;
+   954→  border-top: 1px solid var(--border);
+   955→  background: var(--bg-soft);
+   956→  padding: 14px 20px;
+   957→  text-align: center;
+   958→  padding-bottom: calc(14px + env(safe-area-inset-bottom, 0px));
+   959→}
+   960→.app-footer p { margin: 0; font-size: 0.7rem; color: var(--text-faint); }
+   961→
+   962→/* ---------- ۲۴) حالت خالی ---------- */
+   963→.empty-state {
+   964→  text-align: center;
+   965→  padding: 36px 16px;
+   966→  color: var(--text-faint);
+   967→  font-size: 0.84rem;
+   968→}
+   969→.empty-state svg { width: 34px; height: 34px; opacity: 0.5; margin-bottom: 8px; }
+   970→.empty-state h4 { margin: 8px 0 4px; color: var(--text-muted); }
+   971→.empty-state p { margin: 0; line-height: 2; }
+   972→.empty-state code { font-size: 0.72rem; }
+   973→
+   974→/* ---------- ۲۵) Backup ---------- */
+   975→.backup-warning {
+   976→  background: rgba(251, 191, 36, 0.08);
+   977→  border: 1px solid rgba(251, 191, 36, 0.35);
+   978→  border-radius: var(--radius-sm);
+   979→  padding: 12px 16px;
+   980→  font-size: 0.78rem;
+   981→  color: var(--text-muted);
+   982→  margin-bottom: 14px;
+   983→  line-height: 2;
+   984→}
+   985→.backup-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+   986→
+   987→.rules-wrap { margin-top: 16px; }
+   988→
+   989→/* ---------- ۲۶) واکنش‌گرایی ---------- */
+   990→@media (max-width: 768px) {
+   991→  .header-inner { padding: 12px 14px; }
+   992→  .app-main { padding: 16px 12px 32px; }
+   993→
+   994→  .kpi-value { font-size: 2rem; }
+   995→  .kpi-card { padding: 16px; gap: 12px; }
+   996→  .kpi-icon { width: 42px; height: 42px; }
+   997→  .kpi-icon svg { width: 21px; height: 21px; }
+   998→
+   999→  .tabs { padding: 0 10px; }
+  1000→  .tab-btn { padding: 9px 12px 11px; font-size: 0.8rem; gap: 6px; }
+  1001→
+  1002→  .form-grid { grid-template-columns: 1fr 1fr; }
+  1003→  .field-actions { grid-column: 1 / -1; }
+  1004→  .rule-grid { grid-template-columns: 1fr 1fr; }
+  1005→
+  1006→  .panel, .formula-card { padding: 16px; }
+  1007→  .settings-grid { grid-template-columns: 1fr; }
+  1008→  .toast-stack { left: 10px; right: 10px; max-width: none; }
+  1009→  .modal-card { padding: 18px; }
+  1010→}
+  1011→
+  1012→@media (max-width: 420px) {
+  1013→  .form-grid { grid-template-columns: 1fr; }
+  1014→  .rule-grid { grid-template-columns: 1fr; }
+  1015→  .header-inner { flex-direction: column; align-items: stretch; }
+  1016→  .status-badges { justify-content: center; }
+  1017→  .brand { justify-content: center; }
+  1018→}
+  1019→
+  1020→/* ---------- ۲۷) کاهش حرکت ---------- */
+  1021→@media (prefers-reduced-motion: reduce) {
+  1022→  *, *::before, *::after {
+  1023→    animation-duration: 0.01ms !important;
+  1024→    transition-duration: 0.01ms !important;
+  1025→  }
+  1026→}
+  1027→
