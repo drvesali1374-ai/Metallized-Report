@@ -1,0 +1,98 @@
+/* =========================================================================
+   app.js — نقطهٔ شروع و هماهنگ‌کنندهٔ مرکزی برنامه
+   -------------------------------------------------------------------------
+   وظایف:
+     ۱) بررسی سلامت کتابخانه‌های لوکال (§72)
+     ۲) بازکردن پایگاه‌داده + اجرای مهاجرت‌ها (§76)
+     ۳) راه‌اندازی نماها و تب‌ها
+     ۴) refreshAll — به‌روزرسانی کل سیستم پس از هر تغییر داده (§55، §90-§91)
+   ========================================================================= */
+
+'use strict';
+
+(function () {
+  const UI = RM.ui;
+
+  /* ================================================================
+     مرکز به‌روزرسانی (§55، §79)
+     تنها مسیر اعمال تغییرات: بی‌اعتبارسازی Cache موتور محاسبه
+     → محاسبهٔ مجدد → تغذیهٔ تمام نماها از همان نتیجه.
+     تغییرات صرفاً UI (مثل مرتب‌سازی) محاسبات را تکرار نمی‌کنند.
+     ================================================================ */
+
+  RM.refreshAll = async function () {
+    RM.calcEngine.invalidate();
+    const state = await RM.calcEngine.getState();
+
+    // همهٔ نماها از همان شیء وضعیت تغذیه می‌کنند (Single Source of Truth §105)
+    await Promise.all([
+      RM.views.dashboard.render(state),
+      RM.views.importView.render(),
+      RM.views.rolls.renderTable(),
+      RM.views.setup.render(),
+      RM.views.settings.renderAll(),
+    ]);
+
+    return state;
+  };
+
+  /* ================================================================
+     شروع برنامه
+     ================================================================ */
+
+  async function initApp() {
+    const badgeDb = document.getElementById('badge-db');
+    const badgeDbText = document.getElementById('badge-db-text');
+
+    /* --- ۱) بررسی کتابخانه‌های لوکال (§72) --- */
+    if (typeof Dexie === 'undefined' || typeof XLSX === 'undefined') {
+      badgeDb.classList.add('err');
+      badgeDbText.textContent = 'خطای کتابخانه‌ها';
+      document.querySelector('.app-main').innerHTML = `
+        <article class="panel panel-lib-error" style="margin-top:24px">
+          <h3 class="section-title">خطای بارگذاری کتابخانه‌ها</h3>
+          <p class="panel-desc" style="line-height:2.2">
+            فایل‌های <code>lib/dexie.min.js</code> یا <code>lib/xlsx.full.min.js</code> کنار
+            <code>index.html</code> یافت نشدند.<br>
+            لطفاً مطابق راهنمای فایل <code>README.md</code> این دو فایل را در پوشهٔ <code>lib</code> قرار دهید.
+          </p>
+        </article>`;
+      return;
+    }
+
+    try {
+      /* --- ۲) بازکردن دیتابیس + مهاجرت امن (§76) --- */
+      await RM.db.db.open();
+      badgeDb.classList.add('ok');
+      badgeDbText.textContent = 'پایگاه‌داده آماده';
+
+      /* --- ۳) راه‌اندازی نماها --- */
+      UI.initTabs();
+      RM.views.importView.init();
+      await RM.views.rolls.init();
+      await RM.views.setup.init();   // async — بارگذاری پنل مرتب‌سازی ماندگار
+      RM.views.settings.init();
+
+      // هوک‌های نمایش تب (رندر هنگام باز شدن — از Cache، بدون محاسبهٔ مجدد)
+      RM.viewHooks = {
+        rolls: () => RM.views.rolls.renderTable(),
+      };
+
+      /* --- ۴) محاسبهٔ اولیه + رندر همهٔ نماها --- */
+      await RM.refreshAll();
+
+      console.info('✅ سامانهٔ مانیتورینگ رول‌ها آماده است — حالت کاملاً آفلاین');
+    } catch (err) {
+      console.error('[شروع برنامه]', err);
+      badgeDb.classList.add('err');
+      badgeDbText.textContent = 'خطای پایگاه‌داده';
+      UI.toast(
+        'اتصال به پایگاه‌دادهٔ محلی ممکن نشد. اگر مرورگر در حالت خصوصی است، از پنجرهٔ عادی استفاده کنید.',
+        'error',
+        8000
+      );
+    }
+  }
+
+  document.addEventListener('DOMContentLoaded', initApp);
+})();
