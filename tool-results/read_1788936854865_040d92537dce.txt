@@ -1,0 +1,754 @@
+     1→     1→/* =========================================================================
+     2→     2→   ui.js — ابزارهای مشترک رابط کاربری
+     3→     3→   -------------------------------------------------------------------------
+     4→     4→   شامل: Toast، Modal تأیید (Promise-based)، Modal اطلاعاتی،
+     5→     5→   مدیریت تب‌ها، رندر جدول صفحه‌بندی‌شده (§56) و Escape امن.
+     6→     6→   ========================================================================= */
+     7→     7→
+     8→     8→'use strict';
+     9→     9→
+    10→    10→(function () {
+    11→    11→  const U = RM.utils;
+    12→    12→
+    13→    13→  const UI = {};
+    14→    14→
+    15→    15→  /* ---------------- آیکون‌های SVG ---------------- */
+    16→    16→
+    17→    17→  UI.icons = {
+    18→    18→    success: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></svg>',
+    19→    19→    error:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M15 9l-6 6M9 9l6 6"/></svg>',
+    20→    20→    warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
+    21→    21→    info:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
+    22→    22→    check:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>',
+    23→    23→    cross:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
+    24→    24→    alert:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>',
+    25→    25→    trash:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>',
+    26→    26→    edit:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>',
+    27→    27→    audit:   '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>',
+    28→    28→    grip:    '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.4"/><circle cx="15" cy="6" r="1.4"/><circle cx="9" cy="12" r="1.4"/><circle cx="15" cy="12" r="1.4"/><circle cx="9" cy="18" r="1.4"/><circle cx="15" cy="18" r="1.4"/></svg>',
+    29→    29→    plus:    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>',
+    30→    30→  };
+    31→    31→
+    32→    32→  /* ---------------- Toast ---------------- */
+    33→    33→
+    34→    34→  /** نمایش اعلان شناور؛ type ∈ success | error | warning | info */
+    35→    35→  UI.toast = function (message, type = 'info', duration = 4200) {
+    36→    36→    const stack = document.getElementById('toasts');
+    37→    37→    if (!stack) return;
+    38→    38→
+    39→    39→    const el = document.createElement('div');
+    40→    40→    el.className = `toast toast-${type}`;
+    41→    41→    el.setAttribute('role', 'status');
+    42→    42→    el.innerHTML = `${UI.icons[type] || UI.icons.info}<div>${message}</div>`;
+    43→    43→    stack.appendChild(el);
+    44→    44→
+    45→    45→    const timer = setTimeout(dismiss, duration);
+    46→    46→    function dismiss() {
+    47→    47→      clearTimeout(timer);
+    48→    48→      el.classList.add('leaving');
+    49→    49→      el.addEventListener('animationend', () => el.remove(), { once: true });
+    50→    50→    }
+    51→    51→    el.addEventListener('click', dismiss);
+    52→    52→  };
+    53→    53→
+    54→    54→  /* ---------------- Modal تأیید (Promise) ---------------- */
+    55→    55→
+    56→    56→  let modalResolve = null;
+    57→    57→
+    58→    58→  /**
+    59→    59→   * نمایش پنجرهٔ تأیید و انتظار برای پاسخ.
+    60→    60→   * options: { title, html, message, confirmText, danger }
+    61→    61→   */
+    62→    62→  UI.confirm = function (options) {
+    63→    63→    return new Promise((resolve) => {
+    64→    64→      const overlay = document.getElementById('modal');
+    65→    65→      const titleEl = document.getElementById('modal-title');
+    66→    66→      const msgEl = document.getElementById('modal-msg');
+    67→    67→      const btnOk = document.getElementById('modal-confirm');
+    68→    68→      const btnCancel = document.getElementById('modal-cancel');
+    69→    69→
+    70→    70→      titleEl.textContent = options.title || 'تأیید عملیات';
+    71→    71→      // html اختیاری برای آمار تأیید (محتوای داخلی قابل اعتماد — UI خودمان می‌سازدش)
+    72→    72→      msgEl.innerHTML = (options.html || '') + U.escapeHtml(options.message || '');
+    73→    73→      btnOk.textContent = options.confirmText || 'بله، انجام بده';
+    74→    74→      btnOk.classList.toggle('btn-danger', !!options.danger);
+    75→    75→      btnOk.classList.toggle('btn-primary', !options.danger);
+    76→    76→
+    77→    77→      overlay.hidden = false;
+    78→    78→      btnOk.focus();
+    79→    79→
+    80→    80→      function close(result) {
+    81→    81→        overlay.hidden = true;
+    82→    82→        btnOk.removeEventListener('click', onOk);
+    83→    83→        btnCancel.removeEventListener('click', onCancel);
+    84→    84→        overlay.removeEventListener('click', onOverlay);
+    85→    85→        document.removeEventListener('keydown', onKey);
+    86→    86→        modalResolve = null;
+    87→    87→        resolve(result);
+    88→    88→      }
+    89→    89→      const onOk = () => close(true);
+    90→    90→      const onCancel = () => close(false);
+    91→    91→      const onOverlay = (e) => { if (e.target === overlay) close(false); };
+    92→    92→      const onKey = (e) => { if (e.key === 'Escape') close(false); };
+    93→    93→
+    94→    94→      btnOk.addEventListener('click', onOk);
+    95→    95→      btnCancel.addEventListener('click', onCancel);
+    96→    96→      overlay.addEventListener('click', onOverlay);
+    97→    97→      document.addEventListener('keydown', onKey);
+    98→    98→    });
+    99→    99→  };
+   100→   100→
+   101→   101→  /* ---------------- Modal اطلاعاتی (Audit — §45) ---------------- */
+   102→   102→
+   103→   103→  /** نمایش پنجرهٔ اطلاعات با محتوای ساختاریافته (ریشه قابل اعتماد) */
+   104→   104→  UI.infoModal = function (title, bodyHtml) {
+   105→   105→    const overlay = document.getElementById('modal-info');
+   106→   106→    const titleEl = document.getElementById('modal-info-title');
+   107→   107→    const bodyEl = document.getElementById('modal-info-body');
+   108→   108→    const btnClose = document.getElementById('modal-info-close');
+   109→   109→
+   110→   110→    titleEl.textContent = title;
+   111→   111→    bodyEl.innerHTML = bodyHtml;
+   112→   112→    overlay.hidden = false;
+   113→   113→    btnClose.focus();
+   114→   114→
+   115→   115→    function close() {
+   116→   116→      overlay.hidden = true;
+   117→   117→      btnClose.removeEventListener('click', close);
+   118→   118→      overlay.removeEventListener('click', onOverlay);
+   119→   119→      document.removeEventListener('keydown', onKey);
+   120→   120→    }
+   121→   121→    const onOverlay = (e) => { if (e.target === overlay) close(); };
+   122→   122→    const onKey = (e) => { if (e.key === 'Escape') close(); };
+   123→   123→
+   124→   124→    btnClose.addEventListener('click', close);
+   125→   125→    overlay.addEventListener('click', onOverlay);
+   126→   126→    document.addEventListener('keydown', onKey);
+   127→   127→  };
+   128→   128→
+   129→   129→  /* ---------------- مدیریت تب‌ها (§71: دسترس‌پذیر) ---------------- */
+   130→   130→
+   131→   131→  UI.initTabs = function () {
+   132→   132→    document.querySelectorAll('.tab-btn').forEach((btn) => {
+   133→   133→      btn.addEventListener('click', () => UI.switchTab(btn.dataset.view));
+   134→   134→    });
+   135→   135→  };
+   136→   136→
+   137→   137→  /** تعویض تب فعال (همراه با فراخوانی هوک نما در صورت وجود) */
+   138→   138→  UI.switchTab = function (viewName) {
+   139→   139→    document.querySelectorAll('.tab-btn').forEach((b) => {
+   140→   140→      const isActive = b.dataset.view === viewName;
+   141→   141→      b.classList.toggle('active', isActive);
+   142→   142→      b.setAttribute('aria-selected', String(isActive));
+   143→   143→    });
+   144→   144→    document.querySelectorAll('.view').forEach((section) => {
+   145→   145→      const isActive = section.id === `view-${viewName}`;
+   146→   146→      section.classList.toggle('active', isActive);
+   147→   147→      section.hidden = !isActive;
+   148→   148→    });
+   149→   149→    // هوک نمایش نما (مثلاً رندر با دادهٔ تازه هنگام باز شدن)
+   150→   150→    const hook = RM.viewHooks && RM.viewHooks[viewName];
+   151→   151→    if (typeof hook === 'function') hook();
+   152→   152→  };
+   153→   153→
+   154→   154→  /* ---------------- جدول صفحه‌بندی‌شده (§56) ---------------- */
+   155→   155→
+   156→   156→  /**
+   157→   157→   * رندر جدول صفحه‌بندی‌شده:
+   158→   158→   * @param wrap       عنصر نگهدارندهٔ جدول
+   159→   159→   * @param columns    [{key, label, render?, className?, sortable?}]
+   160→   160→   * @param rows       داده‌ها
+   161→   161→   * @param opts       { page, pageSize, emptyText, footerInfo }
+   162→   162→   */
+   163→   163→  UI.renderTable = function (wrap, columns, rows, opts = {}) {
+   164→   164→    const pageSize = opts.pageSize || RM.config.PAGE_SIZE;
+   165→   165→    const page = opts.page || 1;
+   166→   166→    const emptyText = opts.emptyText || 'داده‌ای برای نمایش وجود ندارد.';
+   167→   167→
+   168→   168→    if (!rows.length) {
+   169→   169→      wrap.innerHTML = `
+   170→   170→        <div class="empty-state">
+   171→   171→          ${UI.icons.alert}
+   172→   172→          <p>${emptyText}</p>
+   173→   173→        </div>`;
+   174→   174→      return { page: 1, pages: 0 };
+   175→   175→    }
+   176→   176→
+   177→   177→    const pages = Math.max(1, Math.ceil(rows.length / pageSize));
+   178→   178→    const safePage = Math.min(page, pages);
+   179→   179→    const slice = rows.slice((safePage - 1) * pageSize, safePage * pageSize);
+   180→   180→
+   181→   181→    const thead = '<thead><tr>' +
+   182→   182→      columns.map((c) => `<th>${c.label}</th>`).join('') +
+   183→   183→      '</tr></thead>';
+   184→   184→
+   185→   185→    const tbody = '<tbody>' + slice.map((row) => {
+   186→   186→      const cells = columns.map((c) => {
+   187→   187→        const content = c.render ? c.render(row) : U.escapeHtml(row[c.key] ?? '—');
+   188→   188→        return `<td class="${c.className || ''}">${content}</td>`;
+   189→   189→      }).join('');
+   190→   190→      return `<tr>${cells}</tr>`;
+   191→   191→    }).join('') + '</tbody>';
+   192→   192→
+   193→   193→    // نوار صفحه‌بندی (اگر بیش از یک صفحه)
+   194→   194→    const pager = pages > 1
+   195→   195→      ? `<div class="pager" role="navigation" aria-label="صفحه‌بندی جدول">
+   196→   196→           <button type="button" class="btn btn-ghost btn-sm" data-page="1" ${safePage === 1 ? 'disabled' : ''}>ابتدا</button>
+   197→   197→           <button type="button" class="btn btn-ghost btn-sm" data-page="${safePage - 1}" ${safePage === 1 ? 'disabled' : ''}>قبلی</button>
+   198→   198→           <span class="pager-info">صفحهٔ ${U.faNum(safePage)} از ${U.faNum(pages)} — ${U.faNum(rows.length)} ردیف</span>
+   199→   199→           <button type="button" class="btn btn-ghost btn-sm" data-page="${safePage + 1}" ${safePage === pages ? 'disabled' : ''}>بعدی</button>
+   200→   200→           <button type="button" class="btn btn-ghost btn-sm" data-page="${pages}" ${safePage === pages ? 'disabled' : ''}>انتها</button>
+   201→   201→         </div>`
+   202→   202→      : (opts.footerInfo ? `<div class="pager"><span class="pager-info">${opts.footerInfo(rows.length)}</span></div>` : '');
+   203→   203→
+   204→   204→    wrap.innerHTML = `
+   205→   205→      <div class="table-wrap table-scroll">
+   206→   206→        <table class="data-table">${thead}${tbody}</table>
+   207→   207→      </div>
+   208→   208→      ${pager}`;
+   209→   209→
+   210→   210→    // رویداد صفحه‌بندی
+   211→   211→    wrap.querySelectorAll('[data-page]').forEach((btn) => {
+   212→   212→      btn.addEventListener('click', () => {
+   213→   213→        const nextPage = Number(btn.dataset.page);
+   214→   214→        if (opts.onPageChange) opts.onPageChange(nextPage);
+   215→   215→      });
+   216→   216→    });
+   217→   217→
+   218→   218→    return { page: safePage, pages };
+   219→   219→  };
+   220→   220→
+   221→   221→  /* ---------------- کمک‌های اعتبارسنجی فرم (§69) ---------------- */
+   222→   222→
+   223→   223→  /** نمایش/پاک‌سازی خطای یک فیلد: حاشیهٔ قرمز + پیام زیر فیلد + فوکوس */
+   224→   224→  UI.setFieldError = function (input, errEl, message) {
+   225→   225→    if (!input) return;
+   226→   226→    input.classList.toggle('invalid', !!message);
+   227→   227→    if (errEl) {
+   228→   228→      errEl.textContent = message || '';
+   229→   229→      errEl.hidden = !message;
+   230→   230→    }
+   231→   231→  };
+   232→   232→
+   233→   233→  /** پاک‌کردن همهٔ خطاهای یک فرم */
+   234→   234→  UI.clearFormErrors = function (form) {
+   235→   235→    form.querySelectorAll('.field-error').forEach((el) => {
+   236→   236→      el.textContent = '';
+   237→   237→      el.hidden = true;
+   238→   238→    });
+   239→   239→    form.querySelectorAll('input.invalid, select.invalid').forEach((el) => {
+   240→   240→      el.classList.remove('invalid');
+   241→   241→    });
+   242→   242→  };
+   243→   243→
+   244→   244→  /* ---------------- ستون‌های جزئیات رکورد با نام Mapping‌شده ---------------- */
+   245→   245→
+   246→   246→  /**
+   247→   247→   * ساخت ستون‌های جدول جزئیات رکورد (گروه رول / Drill-down کیفیت / Import).
+   248→   248→   * نام هر ستون از Mapping کاربر خوانده می‌شود (اگر Dataset وارد شده باشد
+   249→   249→   * نام واقعی ستون اکسل؛ وگرنه برچسب منطقی فارسی).
+   250→   250→   * @param {string} sourceKey   'rolls' | 'archived'
+   251→   251→   * @param {Array|null} selectedKeys  ترتیب/انتخاب ستون‌ها (null → تنظیم ذخیره‌شده)
+   252→   252→   */
+   253→   253→  UI.rollDetailColumns = async function (sourceKey, selectedKeys) {
+   254→   254→    const labels = await RM.normalize.effectiveColumnLabels(sourceKey);
+   255→   255→
+   256→   256→    const RENDERERS = {
+   257→   257→      rollNumber:     (r) => U.escapeHtml(r.rollNumber || '—'),
+   258→   258→      actualLength:   (r) => r.actualLength === null ? '<span class="muted">—</span>' : U.faNum(r.actualLength),
+   259→   259→      productionDate: (r) => U.escapeHtml(U.faDateTime(r.productionDate)),
+   260→   260→      netWeight:      (r) => r.netWeight === null ? '<span class="muted">—</span>' : U.faNum(r.netWeight),
+   261→   261→      grade:          (r) => U.escapeHtml(r.grade || '—'),
+   262→   262→      status:         (r) => U.escapeHtml(r.status || '—'),
+   263→   263→      width:          (r) => r.width === null ? '<span class="muted">—</span>' : U.faWidth(r.width),
+   264→   264→      cutWidth:       (r) => r.cutWidth === null ? '<span class="muted">—</span>' : U.faWidth(r.cutWidth),
+   265→   265→      thickness:      (r) => r.thickness === null ? '<span class="muted">—</span>' : U.faNum(r.thickness),
+   266→   266→      setupNumber:    (r) => r.setupNumber === null ? '<span class="muted">—</span>' : U.faNum(r.setupNumber),
+   267→   267→      filmType:       (r) => U.escapeHtml(r.filmType || '—'),
+   268→   268→      palletNumber:   (r) => U.escapeHtml(r.palletNumber || '—'),
+   269→   269→    };
+   270→   270→
+   271→   271→    let order = selectedKeys;
+   272→   272→    if (!order || !order.length) {
+   273→   273→      order = await RM.db.getSetting('rollDetailColumns', RM.config.DETAIL_DEFAULT_COLUMNS);
+   274→   274→    }
+   275→   275→
+   276→   276→    return (order || [])
+   277→   277→      .filter((k) => RENDERERS[k])
+   278→   278→      .map((k) => ({
+   279→   279→        key: k,
+   280→   280→        label: U.escapeHtml(labels[k] || RM.config.FIELD_LABELS[k] || k),
+   281→   281→        className: k === 'rollNumber' || k === 'grade' ? 'ltr' : '',
+   282→   282→        render: RENDERERS[k],
+   283→   283→      }));
+   284→   284→  };
+   285→   285→
+   286→   286→  /* ---------------- مودال مشترک Drill-down رکوردها (§8/§9 اصلاحات) ---------------- */
+   287→   287→
+   288→   288→  /**
+   289→   289→   * نمایش رکوردهای عامل یک هشدار/مشکل در جدولی با ستون‌های Mapping‌شده.
+   290→   290→   * مسیر کاربر: Summary → مشکل → رکوردهای عامل مشکل.
+   291→   291→   * همهٔ رکوردها از طریق صفحه‌بندی قابل مشاهده‌اند (دکمه‌های ابتدا/قبلی/بعدی/انتها).
+   292→   292→   * @param {string} title        عنوان مودال
+   293→   293→   * @param {Array}  records      رکوردهای نرمال‌شدهٔ مدل داخلی
+   294→   294→   * @param {object} opts         { source, subtitle }
+   295→   295→   */
+   296→   296→  UI.recordsDrillModal = async function (title, records, opts = {}) {
+   297→   297→    const sourceKey = opts.source || 'rolls';
+   298→   298→    const columns = await UI.rollDetailColumns(sourceKey);
+   299→   299→
+   300→   300→    UI.infoModal(title, `
+   301→   301→      <div class="drill-subtitle">
+   302→   302→        ${opts.subtitle ? U.escapeHtml(opts.subtitle) : ''}
+   303→   303→        <b>${U.faNum(records.length)}</b> رکورد
+   304→   304→      </div>
+   305→   305→      <div id="drill-table-wrap"></div>
+   306→   306→    `);
+   307→   307→
+   308→   308→    // صفحه‌بندی کارا: تغییر صفحه فقط جدول را دوباره رندر می‌کند (بدون بستن مودال)
+   309→   309→    const renderPage = (page) => {
+   310→   310→      UI.renderTable(document.getElementById('drill-table-wrap'), columns, records, {
+   311→   311→        page,
+   312→   312→        pageSize: RM.config.PAGE_SIZE,
+   313→   313→        emptyText: 'رکوردی برای نمایش یافت نشد.',
+   314→   314→        onPageChange: (nextPage) => renderPage(nextPage),
+   315→   315→      });
+   316→   316→    };
+   317→   317→    renderPage(1);
+   318→   318→  };
+   319→   319→
+   320→   320→  /* ---------------- پنل مرتب‌سازی مشترک (چیپ‌های کشیدنی — §36-§38) ---------------- */
+   321→   321→
+   322→   322→  /**
+   323→   323→   * رندر «پنل مرتب‌سازی» — چیپ‌های مراحل مرتب‌سازی با کشیدن‌ورها،
+   324→   324→   * تغییر جهت و حذف. مولفهٔ مشترک رول‌های خام و گزارش ستاپ‌ها.
+   325→   325→   * @param {HTMLElement} wrap       عنصر نگهدارندهٔ چیپ‌ها
+   326→   326→   * @param {Array}        pipeline  [{field, direction}]
+   327→   327→   * @param {object}       fields    رجیستری فیلدها ({label})
+   328→   328→   * @param {object}       handlers  { onDir(i), onRemove(i), onReorder(from, to), emptyText? }
+   329→   329→   */
+   330→   330→  UI.sortPanel = function (wrap, pipeline, fields, handlers) {
+   331→   331→    wrap.innerHTML = pipeline.map((step, i) => {
+   332→   332→      const meta = fields[step.field] || { label: step.field };
+   333→   333→      return `
+   334→   334→        <div class="sort-chip" draggable="true" data-index="${i}" title="برای تغییر اولویت بکشید">
+   335→   335→          <span class="grip">${UI.icons.grip}</span>
+   336→   336→          <span class="sort-priority">${U.faNum(i + 1)}</span>
+   337→   337→          <span class="sort-label">${U.escapeHtml(meta.label)}</span>
+   338→   338→          <button type="button" class="sort-dir ${step.direction}" data-dir="${i}"
+   339→   339→                  aria-label="تغییر جهت مرتب‌سازی" title="تغییر جهت">
+   340→   340→            ${step.direction === 'asc' ? '↑' : '↓'}
+   341→   341→          </button>
+   342→   342→          <button type="button" class="sort-remove" data-remove="${i}"
+   343→   343→                  aria-label="حذف از مرتب‌سازی" title="حذف">${UI.icons.cross}</button>
+   344→   344→        </div>`;
+   345→   345→    }).join('') ||
+   346→   346→      `<span class="muted" style="font-size:.78rem">${U.escapeHtml(handlers.emptyText || 'مرتب‌سازی پیش‌فرض')}</span>`;
+   347→   347→
+   348→   348→    // تغییر جهت
+   349→   349→    wrap.querySelectorAll('[data-dir]').forEach((btn) => {
+   350→   350→      btn.addEventListener('click', () => handlers.onDir(Number(btn.dataset.dir)));
+   351→   351→    });
+   352→   352→
+   353→   353→    // حذف مرحله
+   354→   354→    wrap.querySelectorAll('[data-remove]').forEach((btn) => {
+   355→   355→      btn.addEventListener('click', () => handlers.onRemove(Number(btn.dataset.remove)));
+   356→   356→    });
+   357→   357→
+   358→   358→    // ---------- کشیدن و رها کردن برای تغییر ترتیب (§37) ----------
+   359→   359→    let dragSrcIndex = null;
+   360→   360→
+   361→   361→    wrap.querySelectorAll('.sort-chip').forEach((chip) => {
+   362→   362→      chip.addEventListener('dragstart', (e) => {
+   363→   363→        dragSrcIndex = Number(chip.dataset.index);
+   364→   364→        chip.classList.add('dragging');
+   365→   365→        e.dataTransfer.effectAllowed = 'move';
+   366→   366→        e.dataTransfer.setData('text/plain', String(dragSrcIndex));
+   367→   367→      });
+   368→   368→
+   369→   369→      chip.addEventListener('dragend', () => {
+   370→   370→        chip.classList.remove('dragging');
+   371→   371→        wrap.querySelectorAll('.sort-chip').forEach((c) => c.classList.remove('drag-over'));
+   372→   372→        dragSrcIndex = null;
+   373→   373→      });
+   374→   374→
+   375→   375→      chip.addEventListener('dragover', (e) => {
+   376→   376→        e.preventDefault();
+   377→   377→        e.dataTransfer.dropEffect = 'move';
+   378→   378→        if (!chip.classList.contains('drag-over')) chip.classList.add('drag-over');
+   379→   379→      });
+   380→   380→
+   381→   381→      chip.addEventListener('dragleave', () => chip.classList.remove('drag-over'));
+   382→   382→
+   383→   383→      chip.addEventListener('drop', (e) => {
+   384→   384→        e.preventDefault();
+   385→   385→        const from = dragSrcIndex;
+   386→   386→        const to = Number(chip.dataset.index);
+   387→   387→        if (from === null || from === to) return;
+   388→   388→        handlers.onReorder(from, to);
+   389→   389→      });
+   390→   390→    });
+   391→   391→  };
+   392→   392→
+   393→   393→  /* ---------------- جدول بلند با فیلتر زیر سرستون‌ها (مشترک ۳ جدول) ---------------- */
+   394→   394→
+   395→   395→  /**
+   396→   396→   * نرمال‌سازی متن جست‌وجو — ارقام فارسی/عربی → لاتین + حذف جداکننده‌های
+   397→   397→   * هزارگان و فاصله‌ها. هم روی «مقدار جست‌وجو» و هم روی «متن سلول» اعمال
+   398→   398→   * می‌شود تا «۸» با 8 و «۲۳» با 23 هم‌ارزش شود.
+   399→   399→   */
+   400→   400→  UI.filterNormalize = function (text) {
+   401→   401→    return U.toLatinDigits(String(text ?? ''))
+   402→   402→      .replace(/[,\u066C\u2019\u066B\s]/g, '')
+   403→   403→      .trim()
+   404→   404→      .toLowerCase();
+   405→   405→  };
+   406→   406→
+   407→   407→  /**
+   408→   408→   * منطق تطبیق «شامل بودن» (نسخهٔ ۲٫۳):
+   409→   409→   *   - عدد و متن هر دو با «شامل بودن» فیلتر می‌شوند (نه تطابق دقیق)
+   410→   410→   *   - invert = true → برعکس: «شامل نشود»
+   411→   411→   * @param {string[]} tokens   متن‌های قابل‌جست‌وجوی سلول (نمایش + مقدار خام)
+   412→   412→   * @param {string}   value    مقدار واردشده در باکس فیلتر
+   413→   413→   * @param {boolean}  invert   منطق برعکس فعال است؟
+   414→   414→   */
+   415→   415→  UI.filterContains = function (tokens, value, invert) {
+   416→   416→    const needle = UI.filterNormalize(value);
+   417→   417→    if (needle === '') return true;      // فیلتر خالی → همه
+   418→   418→    const hay = (tokens || [])
+   419→   419→      .map((t) => UI.filterNormalize(t))
+   420→   420→      .filter(Boolean)
+   421→   421→      .join(' ');
+   422→   422→    const contains = hay.includes(needle);
+   423→   423→    return invert ? !contains : contains;
+   424→   424→  };
+   425→   425→
+   426→   426→  /** خواندن/ساخت وضعیت فیلتر یک ستون ({ value, invert }) از state */
+   427→   427→  UI.filterStateOf = function (state, key) {
+   428→   428→    if (!state.filters[key] || typeof state.filters[key] !== 'object') {
+   429→   429→      state.filters[key] = { value: '', invert: false };
+   430→   430→    }
+   431→   431→    return state.filters[key];
+   432→   432→  };
+   433→   433→
+   434→   434→  /** آیکون «≠» دکمهٔ برعکس‌کردن منطق فیلتر */
+   435→   435→  UI.icons.notContains = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><line x1="5.8" y1="18.2" x2="18.2" y2="5.8"/></svg>';
+   436→   436→
+   437→   437→  /**
+   438→   438→   * جدول بلند (حداقل ۵۰ رکورد) + فیلتر پیشرفتهٔ زیر سرستون‌ها — مولفهٔ
+   439→   439→   * مشترک جدول‌های «رول‌های برش‌خورده»، «رول‌های خام» و «گزارش ستاپ‌ها».
+   440→   440→   *
+   441→   441→   * منطق نسخهٔ ۲٫۳:
+   442→   442→   *   - فیلتر همهٔ ستون‌ها (عدد و متن) با «شامل بودن» + ارقام فارسی/لاتین
+   443→   443→   *   - دکمهٔ کوچک «≠» کنار هر باکس → سوییچ «شامل نشود»
+   444→   444→   *   - فوکوس باکس فیلتر حفظ می‌شود (فقط tbody دوباره رندر می‌شود،
+   445→   445→   *     سرستون/باکس‌ها بازسازی نمی‌شوند و فوکوس جابه‌جا نمی‌شود)
+   446→   446→   *   - سرستون + ردیف فیلتر چسبان هنگام اسکرول عمودی
+   447→   447→   *
+   448→   448→   * منطق نسخهٔ ۲٫۴:
+   449→   449→   *   - باکس «ردیف‌های قابل نمایش» در نوار پایین → ارتفاع جدول داینامیک
+   450→   450→   *     (فقط استایل ارتفاع به‌روز می‌شود؛ جدول/فیلترها/فوکوس دست‌نخورده)
+   451→   451→   *   - پشتیبانی عرض ستون (c.width → colgroup با table-layout:fixed)
+   452→   452→   *
+   453→   453→   * منطق نسخهٔ ۲٫۵:
+   454→   454→   *   - Wrap Text هدرها: عنوان ستون‌ها با توجه به عرض ستون چندخط می‌شود؛
+   455→   455→   *     ارتفاع ردیف سرستون اندازه‌گیری و در متغیر --ft-head-h ثبت می‌شود تا
+   456→   456→   *     ردیف فیلتر چسبان دقیقاً زیر آن بنشیند (ResizeObserver → هم‌گام با تغییر عرض)
+   457→   457→   *   - چیدمان باکس فیلتر: آیکون «≠» کوچک در سمت راست + باکس فیلتر در ادامه
+   458→   458→   *     که عرضش با عرض ستون تنظیم می‌شود (min-width: 0 → هرگز ناقص نمی‌شود)
+   459→   459→   *
+   460→   460→   * @param {HTMLElement} wrap     نگهدارندهٔ جدول
+   461→   461→   * @param {Array}  columns       [{key, label, render(row)→html, tokens(row)→string[],
+   462→   462→   *                                className?, filterable? (پیش‌فرض true), width? (px — نسخهٔ ۲٫۴)}]
+   463→   463→   * @param {Array}  rows          همهٔ رکوردها (مرتب‌شده توسط فراخوان)
+   464→   464→   * @param {object} opts          { state: {filters:{}, visibleRows?} (ماندگار بین رندرها),
+   465→   465→   *                                visibleRows, rowHeight, tableClass, emptyText,
+   466→   466→   *                                filteredEmptyText, footerNote, rowsControl? (bool — باکس تعداد ردیف),
+   467→   467→   *                                onRowsChange?(n) (ذخیرهٔ ماندگار),
+   468→   468→   *                                fixedCols? (bool — table-layout:fixed برای عرض‌های ستون),
+   469→   469→   *                                onRendered(visibleRows) }
+   470→   470→   */
+   471→   471→  UI.filterTable = function (wrap, columns, rows, opts = {}) {
+   472→   472→    if (!wrap) return;
+   473→   473→    const state = opts.state || { filters: {} };
+   474→   474→    state.filters = state.filters || {};
+   475→   475→    // تعداد ردیف قابل نمایش (نسخهٔ ۲٫۴): اولویت با state کاربر (ماندگار)، بعد opts
+   476→   476→    if (!Number.isFinite(Number(state.visibleRows)) || Number(state.visibleRows) <= 0) {
+   477→   477→      state.visibleRows = opts.visibleRows || 50;
+   478→   478→    }
+   479→   479→    const rowHeight = opts.rowHeight || 42;
+   480→   480→    const tableClass = opts.tableClass || 'cut-table';
+   481→   481→    const filterableCols = columns.filter((c) => c.filterable !== false);
+   482→   482→
+   483→   483→    /* ---------- تطبیق یک رکورد با همهٔ فیلترهای فعال ---------- */
+   484→   484→    const rowMatches = (row) => filterableCols.every((c) => {
+   485→   485→      const f = UI.filterStateOf(state, c.key);
+   486→   486→      if (String(f.value ?? '').trim() === '') return true;
+   487→   487→      return UI.filterContains(c.tokens ? c.tokens(row) : [String(row[c.key] ?? '')], f.value, f.invert);
+   488→   488→    });
+   489→   489→
+   490→   490→    /* ---------- ساخت سرستون + ردیف فیلتر (یک‌بار در هر رندر کامل) ---------- */
+   491→   491→    const headRow = columns.map((c) => `<th${c.headerTitle ? ` title="${U.escapeHtml(c.headerTitle)}"` : ''}${c.width ? ` style="width:${Number(c.width)}px;min-width:${Number(c.width)}px"` : ''}>${c.label}</th>`).join('');
+   492→   492→    const filterRow = columns.map((c) => {
+   493→   493→      if (c.filterable === false) return '<th class="cut-filter-cell"></th>';
+   494→   494→      const f = UI.filterStateOf(state, c.key);
+   495→   495→      return `
+   496→   496→      <th class="cut-filter-cell" aria-label="فیلتر ${U.escapeHtml(String(c.label))}">
+   497→   497→        <div class="ft-filter-box">
+   498→   498→          <button type="button" class="ft-invert${f.invert ? ' on' : ''}" data-ft-invert="${U.escapeHtml(c.key)}"
+   499→   499→                  aria-pressed="${String(!!f.invert)}"
+   500→   500→                  title="${f.invert ? 'منطق فعلی: شامل نشود — برای بازگشت به «شامل بودن» کلیک کنید' : 'برعکس‌کردن منطق: شامل نشود'}"
+   501→   501→                  aria-label="برعکس‌کردن منطق فیلتر ستون ${U.escapeHtml(String(c.label))}">
+   502→   502→            ${UI.icons.notContains}
+   503→   503→          </button>
+   504→   504→          <input type="text" class="cut-filter-input" data-ft-filter="${U.escapeHtml(c.key)}"
+   505→   505→                 value="${U.escapeHtml(f.value ?? '')}"
+   506→   506→                 autocomplete="off" placeholder="فیلتر…" inputmode="text"
+   507→   507→                 aria-label="فیلتر ستون ${U.escapeHtml(String(c.label))}">
+   508→   508→        </div>
+   509→   509→      </th>`;
+   510→   510→    }).join('');
+   511→   511→
+   512→   512→    /* ---------- رندر بدنه (ایزوله — سرستون دست‌نخورده می‌ماند) ---------- */
+   513→   513→    const renderBody = () => {
+   514→   514→      const visible = rows.filter(rowMatches);
+   515→   515→      const tbody = wrap.querySelector('.ft-tbody');
+   516→   516→      const statusEl = wrap.querySelector('.ft-status');
+   517→   517→      if (!tbody) return visible;
+   518→   518→
+   519→   519→      const activeCount = filterableCols.filter((c) =>
+   520→   520→        String(UI.filterStateOf(state, c.key).value ?? '').trim() !== '').length;
+   521→   521→
+   522→   522→      tbody.innerHTML = visible.length
+   523→   523→        ? visible.map((row) => {
+   524→   524→            const cells = columns.map((c) => {
+   525→   525→              const content = c.render ? c.render(row) : U.escapeHtml(row[c.key] ?? '—');
+   526→   526→              return `<td class="${c.className || ''}">${content}</td>`;
+   527→   527→            }).join('');
+   528→   528→            return `<tr>${cells}</tr>`;
+   529→   529→          }).join('')
+   530→   530→        : `<tr><td colspan="${columns.length}" class="muted" style="text-align:center;padding:18px">${
+   531→   531→            rows.length
+   532→   532→              ? (opts.filteredEmptyText || 'هیچ رکوردی با فیلترهای فعلی مطابقت ندارد — فیلترها را پاک کنید.')
+   533→   533→              : (opts.emptyText || 'داده‌ای برای نمایش وجود ندارد.')
+   534→   534→          }</td></tr>`;
+   535→   535→
+   536→   536→      if (statusEl) {
+   537→   537→        statusEl.innerHTML = activeCount
+   538→   538→          ? `<span class="chip chip-strong">${U.faNum(visible.length)} از ${U.faNum(rows.length)} رکورد (فیلترشده)</span>`
+   539→   539→          : `<span class="chip">${U.faNum(rows.length)} رکورد</span>`;
+   540→   540→      }
+   541→   541→
+   542→   542→      if (typeof opts.onRendered === 'function') opts.onRendered(visible, rows);
+   543→   543→      return visible;
+   544→   544→    };
+   545→   545→
+   546→   546→    /* ---------- اسکلت جدول (یک‌بار) ---------- */
+   547→   547→    if (!rows.length && !Object.values(state.filters).some((f) => f && String(f.value ?? '').trim() !== '')) {
+   548→   548→      wrap.innerHTML = `
+   549→   549→        <div class="empty-state">
+   550→   550→          ${UI.icons.alert}
+   551→   551→          <h4>رکوردی برای نمایش وجود ندارد</h4>
+   552→   552→          <p>${opts.emptyText || 'داده‌ای برای نمایش وجود ندارد.'}</p>
+   553→   553→        </div>`;
+   554→   554→      if (typeof opts.onRendered === 'function') opts.onRendered([], rows);
+   555→   555→      return;
+   556→   556→    }
+   557→   557→
+   558→   558→    const applyHeight = (scrollEl, n) => {
+   559→   559→      scrollEl.style.height = `calc(${n} * ${rowHeight}px)`;
+   560→   560→      scrollEl.style.maxHeight = `calc(${n} * ${rowHeight}px)`;
+   561→   561→    };
+   562→   562→
+   563→   563→    // colgroup عرض ستون‌ها (نسخهٔ ۲٫۴) + جدول fixed-cols در صورت وجود عرض
+   564→   564→    const hasWidths = columns.some((c) => c.width);
+   565→   565→    const colgroup = hasWidths
+   566→   566→      ? `<colgroup>${columns.map((c) => `<col${c.width ? ` style="width:${Number(c.width)}px"` : ''}>`).join('')}</colgroup>`
+   567→   567→      : '';
+   568→   568→
+   569→   569→    const heightStyle = `height: calc(${state.visibleRows} * ${rowHeight}px); max-height: calc(${state.visibleRows} * ${rowHeight}px);`;
+   570→   570→    wrap.innerHTML = `
+   571→   571→      <div class="cut-table-scroll" style="${heightStyle}">
+   572→   572→        <table class="data-table ${tableClass}${hasWidths ? ' fixed-cols' : ''}">
+   573→   573→          ${colgroup}
+   574→   574→          <thead>
+   575→   575→            <tr class="cut-head-row">${headRow}</tr>
+   576→   576→            <tr class="cut-filter-row">${filterRow}</tr>
+   577→   577→          </thead>
+   578→   578→          <tbody class="ft-tbody"></tbody>
+   579→   579→        </table>
+   580→   580→      </div>
+   581→   581→      <div class="cut-filter-bar">
+   582→   582→        <span class="muted" style="font-size:.7rem">${opts.footerNote || 'فیلتر هر ستون در زیر سرستون همان ستون · منطق: شامل بودن (عدد و متن)'}</span>
+   583→   583→        <span class="ft-status"></span>
+   584→   584→        ${opts.rowsControl === false ? '' : `
+   585→   585→        <label class="ft-rows" title="تعداد ردیف قابل نمایش قبل از اسکرول — ارتفاع جدول طبق این عدد تغییر می‌کند">
+   586→   586→          <span>ردیف‌های قابل نمایش:</span>
+   587→   587→          <input type="number" class="ft-rows-input" data-ft-rows min="${RM.config.VISIBLE_ROWS_MIN}" max="${RM.config.VISIBLE_ROWS_MAX}" step="1" value="${state.visibleRows}" inputmode="numeric" aria-label="تعداد ردیف قابل نمایش">
+   588→   588→        </label>`}
+   589→   589→        <button type="button" class="btn btn-ghost btn-sm" data-ft-clear>پاک‌کردن فیلترها</button>
+   590→   590→      </div>`;
+   591→   591→
+   592→   592→    /* ---------- ارتفاع داینامیک سرستون (Wrap Text — نسخهٔ ۲٫۵) ----------
+   593→   593→       عنوان ستون‌ها ممکن است با عرض کم ستون چندخط شود؛ ارتفاع واقعی ردیف
+   594→   594→       سرستون اندازه‌گیری و در متغیر CSS --ft-head-h ثبت می‌شود تا ردیف فیلتر
+   595→   595→       چسبان دقیقاً زیر آن بنشیند. ResizeObserver تغییر عرض (پنل عرض ستون‌ها /
+   596→   596→       تغییر اندازهٔ پنجره) را دنبال می‌کند و مقدار را هم‌گام نگه می‌دارد. */
+   597→   597→    const syncHeadHeight = () => {
+   598→   598→      const headTr = wrap.querySelector('.cut-head-row');
+   599→   599→      if (!headTr) return;
+   600→   600→      const h = headTr.offsetHeight;
+   601→   601→      if (h > 0) wrap.style.setProperty('--ft-head-h', `${h}px`);
+   602→   602→    };
+   603→   603→    syncHeadHeight();
+   604→   604→    if (typeof ResizeObserver !== 'undefined') {
+   605→   605→      const headTr = wrap.querySelector('.cut-head-row');
+   606→   606→      if (wrap._ftHeadRO) { try { wrap._ftHeadRO.disconnect(); } catch (e) { /* noop */ } }
+   607→   607→      if (headTr) {
+   608→   608→        wrap._ftHeadRO = new ResizeObserver(syncHeadHeight);
+   609→   609→        wrap._ftHeadRO.observe(headTr);
+   610→   610→      }
+   611→   611→    }
+   612→   612→
+   613→   613→    /* ---------- رویدادها ---------- */
+   614→   614→
+   615→   615→    // ورود متن فیلتر → فقط tbody دوباره رندر می‌شود (فوکوس و caret حفظ می‌شود)
+   616→   616→    let timer = null;
+   617→   617→    wrap.querySelectorAll('[data-ft-filter]').forEach((el) => {
+   618→   618→      el.addEventListener('input', () => {
+   619→   619→        const f = UI.filterStateOf(state, el.dataset.ftFilter);
+   620→   620→        f.value = el.value;
+   621→   621→        clearTimeout(timer);
+   622→   622→        timer = setTimeout(renderBody, 180);
+   623→   623→      });
+   624→   624→    });
+   625→   625→
+   626→   626→    // دکمهٔ کوچک «≠» → سوییچ منطق شامل‌بودن/شامل‌نشدن
+   627→   627→    wrap.querySelectorAll('[data-ft-invert]').forEach((btn) => {
+   628→   628→      btn.addEventListener('click', () => {
+   629→   629→        const f = UI.filterStateOf(state, btn.dataset.ftInvert);
+   630→   630→        f.invert = !f.invert;
+   631→   631→        btn.classList.toggle('on', f.invert);
+   632→   632→        btn.setAttribute('aria-pressed', String(f.invert));
+   633→   633→        btn.title = f.invert
+   634→   634→          ? 'منطق فعلی: شامل نشود — برای بازگشت به «شامل بودن» کلیک کنید'
+   635→   635→          : 'برعکس‌کردن منطق: شامل نشود';
+   636→   636→        renderBody();
+   637→   637→      });
+   638→   638→    });
+   639→   639→
+   640→   640→    // پاک‌کردن همهٔ فیلترها
+   641→   641→    wrap.querySelector('[data-ft-clear]').addEventListener('click', () => {
+   642→   642→      for (const c of filterableCols) {
+   643→   643→        const f = UI.filterStateOf(state, c.key);
+   644→   644→        f.value = '';
+   645→   645→        f.invert = false;
+   646→   646→      }
+   647→   647→      wrap.querySelectorAll('[data-ft-filter]').forEach((el) => { el.value = ''; });
+   648→   648→      wrap.querySelectorAll('[data-ft-invert]').forEach((b) => {
+   649→   649→        b.classList.remove('on');
+   650→   650→        b.setAttribute('aria-pressed', 'false');
+   651→   651→        b.title = 'برعکس‌کردن منطق: شامل نشود';
+   652→   652→      });
+   653→   653→      renderBody();
+   654→   654→      UI.toast('فیلترها پاک شد.', 'info');
+   655→   655→    });
+   656→   656→
+   657→   657→    // باکس «ردیف‌های قابل نمایش» (نسخهٔ ۲٫۴) — فقط ارتفاع اسکرول تغییر می‌کند؛
+   658→   658→    // جدول/فیلترها/فوکوس دست‌نخورده می‌مانند. ماندگاری با onRowsChange.
+   659→   659→    const rowsInput = wrap.querySelector('[data-ft-rows]');
+   660→   660→    if (rowsInput) {
+   661→   661→      let rowsTimer = null;
+   662→   662→      rowsInput.addEventListener('input', () => {
+   663→   663→        clearTimeout(rowsTimer);
+   664→   664→        rowsTimer = setTimeout(() => {
+   665→   665→          const n = Math.min(
+   666→   666→            Math.max(U.parseInt(rowsInput.value) || RM.config.VISIBLE_ROWS_MIN, RM.config.VISIBLE_ROWS_MIN),
+   667→   667→            RM.config.VISIBLE_ROWS_MAX
+   668→   668→          );
+   669→   669→          state.visibleRows = n;
+   670→   670→          rowsInput.value = String(n);
+   671→   671→          const scrollEl = wrap.querySelector('.cut-table-scroll');
+   672→   672→          if (scrollEl) applyHeight(scrollEl, n);
+   673→   673→          if (typeof opts.onRowsChange === 'function') opts.onRowsChange(n);
+   674→   674→        }, 260);
+   675→   675→      });
+   676→   676→    }
+   677→   677→
+   678→   678→    renderBody();
+   679→   679→  };
+   680→   680→
+   681→   681→  /* ---------------- پنل ترتیب ستون‌ها (مشترک — چیپ‌های کشیدنی + باکس عرض) ---------------- */
+   682→   682→
+   683→   683→  /**
+   684→   684→   * پنل «ترتیب ستون‌ها» — نسخهٔ ۲٫۴:
+   685→   685→   *   - ترتیب با کشیدن‌ورها (drag) تغییر می‌کند (فلش‌های ↑/↓ حذف شدند)
+   686→   686→   *   - بجای فلش‌ها، هر ستون یک باکس عددی «عرض (px)» دارد؛ کاربر عرض دلخواه
+   687→   687→   *     هر ستون را وارد می‌کند (صفر یا خالی → عرض خودکار)
+   688→   688→   * برای جدول «گزارش تولید ستاپ‌ها».
+   689→   689→   * @param {HTMLElement} wrap      عنصر نگهدارندهٔ چیپ‌ها
+   690→   690→   * @param {Array}        items    [{key, label, width}] به ترتیب فعلی
+   691→   691→   * @param {object}       handlers { onMove(from, to), onWidth(key, width), emptyText? }
+   692→   692→   */
+   693→   693→  UI.orderPanel = function (wrap, items, handlers) {
+   694→   694→    if (!wrap) return;
+   695→   695→    wrap.innerHTML = items.map((it, i) => `
+   696→   696→      <div class="sort-chip order-chip" draggable="true" data-index="${i}" title="برای تغییر ترتیب بکشید">
+   697→   697→        <span class="grip">${UI.icons.grip}</span>
+   698→   698→        <span class="sort-priority">${U.faNum(i + 1)}</span>
+   699→   699→        <span class="sort-label">${U.escapeHtml(it.label)}</span>
+   700→   700→        <label class="order-width" title="عرض این ستون در جدول (پیکسل) — صفر یا خالی = خودکار">
+   701→   701→          <span class="order-width-unit">px</span>
+   702→   702→          <input type="number" class="order-width-input" data-order-width="${U.escapeHtml(it.key)}"
+   703→   703→                 min="0" max="1200" step="1" inputmode="numeric" aria-label="عرض ستون ${U.escapeHtml(it.label)}"
+   704→   704→                 value="${it.width != null ? Number(it.width) : ''}" placeholder="خودکار">
+   705→   705→        </label>
+   706→   706→      </div>`).join('') ||
+   707→   707→      `<span class="muted" style="font-size:.78rem">${U.escapeHtml(handlers.emptyText || 'بدون ستون')}</span>`;
+   708→   708→
+   709→   709→    // باکس عرض هر ستون (نسخهٔ ۲٫۴) — debounce سبک؛ خالی/۰ = عرض خودکار
+   710→   710→    let widthTimer = null;
+   711→   711→    wrap.querySelectorAll('[data-order-width]').forEach((inp) => {
+   712→   712→      inp.addEventListener('input', () => {
+   713→   713→        clearTimeout(widthTimer);
+   714→   714→        const key = inp.dataset.orderWidth;
+   715→   715→        widthTimer = setTimeout(() => {
+   716→   716→          const v = U.parseInt(inp.value);
+   717→   717→          handlers.onWidth(key, v === null ? 0 : Math.min(Math.max(v, 0), 1200));
+   718→   718→        }, 320);
+   719→   719→      });
+   720→   720→    });
+   721→   721→
+   722→   722→    // کشیدن و رها کردن
+   723→   723→    let dragSrcIndex = null;
+   724→   724→    wrap.querySelectorAll('.order-chip').forEach((chip) => {
+   725→   725→      chip.addEventListener('dragstart', (e) => {
+   726→   726→        dragSrcIndex = Number(chip.dataset.index);
+   727→   727→        chip.classList.add('dragging');
+   728→   728→        e.dataTransfer.effectAllowed = 'move';
+   729→   729→        e.dataTransfer.setData('text/plain', String(dragSrcIndex));
+   730→   730→      });
+   731→   731→      chip.addEventListener('dragend', () => {
+   732→   732→        chip.classList.remove('dragging');
+   733→   733→        wrap.querySelectorAll('.order-chip').forEach((c) => c.classList.remove('drag-over'));
+   734→   734→        dragSrcIndex = null;
+   735→   735→      });
+   736→   736→      chip.addEventListener('dragover', (e) => {
+   737→   737→        e.preventDefault();
+   738→   738→        e.dataTransfer.dropEffect = 'move';
+   739→   739→        if (!chip.classList.contains('drag-over')) chip.classList.add('drag-over');
+   740→   740→      });
+   741→   741→      chip.addEventListener('dragleave', () => chip.classList.remove('drag-over'));
+   742→   742→      chip.addEventListener('drop', (e) => {
+   743→   743→        e.preventDefault();
+   744→   744→        const from = dragSrcIndex;
+   745→   745→        const to = Number(chip.dataset.index);
+   746→   746→        if (from === null || from === to) return;
+   747→   747→        handlers.onMove(from, to);
+   748→   748→      });
+   749→   749→    });
+   750→   750→  };
+   751→   751→
+   752→   752→  RM.ui = UI;
+   753→   753→})();
+   754→   754→

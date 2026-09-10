@@ -1,0 +1,891 @@
+     1→/* =========================================================================
+     2→   views/dashboard.js — نما داشبورد (§57-§59، §52)
+     3→   -------------------------------------------------------------------------
+     4→   این نما هیچ محاسبه‌ای انجام نمی‌دهد؛ فقط از موتور محاسبهٔ مرکزی
+     5→   (RM.calcEngine) تغذیه می‌کند (Single Source of Truth — §105).
+     6→   ========================================================================= */
+     7→
+     8→'use strict';
+     9→
+    10→(function () {
+    11→  const U = RM.utils;
+    12→  const UI = RM.ui;
+    13→  const db = RM.db.db;
+    14→
+    15→  const Dashboard = { _state: null };   // آخرین وضعیت محاسبه (برای Drill-down هشدارها)
+    16→
+    17→  /* ================================================================
+    18→     موتور نمودارهای ECharts (نسخهٔ ۲٫۳ — کاملاً لوکال)
+    19→     ----------------------------------------------------------------
+    20→     - کتابخانه از lib/echarts.min.js لوکال بارگذاری می‌شود (بدون CDN)
+    21→     - رنگ‌ها از همان پالت CSS (زمردی/فیروزه‌ای/کهربایی/رز) — بدون آبی
+    22→     - تم روشن/تاریک پشتیبانی می‌شود (با تغییر تم، نمودارها تازه می‌شوند)
+    23→     - در نبود کتابخانه → Fallback به نمودار CSS قبلی (آفلاین مقاوم)
+    24→     ================================================================ */
+    25→
+    26→  Dashboard._charts = {};          // id → نمونهٔ echarts
+    27→  Dashboard._pendingCharts = false; // دادهٔ تازه در تب مخفی — هنگام نمایش رندر شود
+    28→
+    29→  /** آیا ECharts لوکال در دسترس است؟ */
+    30→  Dashboard.hasECharts = function () {
+    31→    return typeof window.echarts !== 'undefined';
+    32→  };
+    33→
+    34→  /** پالت رنگ متن/محور بر اساس تم فعال */
+    35→  Dashboard.chartPalette = function () {
+    36→    const dark = document.documentElement.dataset.theme === 'dark';
+    37→    return {
+    38→      dark,
+    39→      fontFamily: "'Vazirmatn', 'Tahoma', sans-serif",
+    40→      text: dark ? '#d4d8dc' : '#21262b',
+    41→      muted: dark ? '#9aa0a7' : '#575e66',
+    42→      faint: dark ? '#6b7280' : '#878e95',
+    43→      splitLine: dark ? 'rgba(255,255,255,0.09)' : 'rgba(33,38,43,0.08)',
+    44→      axisLine: dark ? 'rgba(255,255,255,0.16)' : 'rgba(33,38,43,0.14)',
+    45→      tooltipBg: dark ? '#22262b' : '#fcfcfa',
+    46→      tooltipBorder: dark ? 'rgba(255,255,255,0.16)' : '#dcded2',
+    47→      // رنگ‌های کسب‌وکار — همان متغیرهای CSS
+    48→      raw: '#047857',      // زمردی
+    49→      metal: '#b45309',    // کهربایی
+    50→      setup: '#0f766e',    // فیروزه‌ای
+    51→      uncut: '#be123c',    // رز
+    52→      gray: dark ? '#7c848c' : '#a3a89e',
+    53→    };
+    54→  };
+    55→
+    56→  /** ساخت/بازیابی نمونهٔ چارت با شناسهٔ المان */
+    57→  Dashboard.chartOf = function (elId) {
+    58→    const el = document.getElementById(elId);
+    59→    if (!el || !Dashboard.hasECharts()) return null;
+    60→    if (Dashboard._charts[elId]) return Dashboard._charts[elId];
+    61→    if (!el.clientWidth) return null;   // مخفی است — هنگام نمایش ساخته می‌شود
+    62→    const inst = window.echarts.init(el);
+    63→    Dashboard._charts[elId] = inst;
+    64→    return inst;
+    65→  };
+    66→
+    67→  /** اعمال گزینه‌ها روی چارت (بدون Merge — رندر تازه) */
+    68→  Dashboard.applyChart = function (elId, option) {
+    69→    const inst = Dashboard.chartOf(elId);
+    70→    if (!inst) { Dashboard._pendingCharts = true; return false; }
+    71→    inst.setOption(option, { notMerge: true });
+    72→    return true;
+    73→  };
+    74→
+    75→  /** حذف امن نمونهٔ چارت (حالت خالی — جلوگیری از نمونهٔ سرگردان) */
+    76→  Dashboard.disposeChart = function (elId) {
+    77→    if (Dashboard._charts[elId]) {
+    78→      try { Dashboard._charts[elId].dispose(); } catch (e) { /* noop */ }
+    79→      delete Dashboard._charts[elId];
+    80→    }
+    81→  };
+    82→
+    83→  /** رندر مجدد همهٔ نمودارها (تعویض تم / بازگشت به تب) — نسخهٔ ۲٫۴:
+    84→      میله‌ای دستگاه‌ها + دو دونات زمان + نمودار ستونی ستاپ‌ها */
+    85→  Dashboard.rerenderCharts = function () {
+    86→    if (!Dashboard._state) return;
+    87→    const s = Dashboard._state.summary;
+    88→    if (s.timeRulesCount) {
+    89→      Dashboard.renderMachineTimeChart(Dashboard._state);
+    90→      Dashboard.renderTimeDonuts(Dashboard._state);
+    91→      Dashboard.renderSetupInventoryColumnChart(Dashboard._state);
+    92→    }
+    93→    Dashboard._pendingCharts = false;
+    94→  };
+    95→
+    96→  /** هوک نمایش تب — نمودارهای معوق/تازه‌شده را رندر می‌کند */
+    97→  Dashboard.onShown = function () {
+    98→    // اگر المان مخفی بوده و چارت ساخته نشده → ساخت پس از نمایان شدن
+    99→    for (const id of Object.keys(Dashboard._charts)) {
+   100→      Dashboard._charts[id].resize();
+   101→    }
+   102→    Dashboard.rerenderCharts();
+   103→  };
+   104→
+   105→  /* ---------- تغییر اندازهٔ پنجره → مقیاس‌دهی مجدد ---------- */
+   106→  let _resizeTimer = null;
+   107→  window.addEventListener('resize', () => {
+   108→    clearTimeout(_resizeTimer);
+   109→    _resizeTimer = setTimeout(() => {
+   110→      Object.values(Dashboard._charts).forEach((c) => { try { c.resize(); } catch (e) { /* noop */ } });
+   111→    }, 180);
+   112→  });
+   113→
+   114→  /* ---------- تغییر تم → رنگ‌های نمودار تازه ---------- */
+   115→  if (typeof MutationObserver !== 'undefined') {
+   116→    const themeObserver = new MutationObserver(() => Dashboard.rerenderCharts());
+   117→    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+   118→  }
+   119→
+   120→  /** رندر کامل داشبورد از وضعیت محاسبه‌شده */
+   121→  Dashboard.render = async function (state) {
+   122→    Dashboard._state = state;   // برای Drill-down هشدارها و نمودارها
+   123→    const s = state.summary;
+   124→
+   125→    /* ---------- کارت‌های KPI (منطق جدید §58-§59) ---------- */
+   126→    document.getElementById('kpi-raw').textContent = U.faNum(s.rawRollsCount);
+   127→    document.getElementById('kpi-raw-meta').innerHTML =
+   128→      `در تطبیق با ستاپ‌ها: ${U.faNum(s.rawMatchedCount)} · تعداد گروه‌ها: ${U.faNum(s.totalGroups)}`;
+   129→
+   130→    /* ---------- کارت‌های مانده زمان متالایز (تغییرات جدید — جایگزین کارت‌های
+   131→       «رول‌های متالایز شده» و «کل رول‌های ستاپ‌ها») ---------- */
+   132→    if (!s.timeRulesCount) {
+   133→      // هیچ قانون زمانی تعریف نشده — کارت‌ها و چارت حالت خالی
+   134→      document.getElementById('kpi-remaining-setup').textContent = '—';
+   135→      document.getElementById('kpi-remaining-setup-meta').textContent =
+   136→        'قانون زمان متالایز تعریف نشده — از تنظیمات «قانون زمان متالایز» اضافه کنید.';
+   137→      document.getElementById('kpi-remaining-produced').textContent = '—';
+   138→      document.getElementById('kpi-remaining-produced-meta').textContent =
+   139→        'قانون زمان متالایز تعریف نشده — از تنظیمات «قانون زمان متالایز» اضافه کنید.';
+   140→      document.getElementById('machine-time-chips').innerHTML =
+   141→        '<span class="chip chip-warn">قانون زمان تعریف نشده</span>';
+   142→      Dashboard.disposeChart('machine-time-chart');
+   143→      document.getElementById('machine-time-footer').innerHTML = '';
+   144→      document.getElementById('machine-time-chart').innerHTML = `
+   145→        <div class="empty-state">
+   146→          ${UI.icons.alert}
+   147→          <p>برای نمایش گزارش مانده زمان متالایز، ابتدا در تب «تنظیمات» برای هر دستگاه قانون زمان تعریف کنید:<br>
+   148→          (شماره دستگاه، متراژ استاندارد، تعداد در شیفت → مدت زمان خودکار = ۷۲۰ ÷ تعداد)</p>
+   149→        </div>`;
+   150→      // دونات‌ها و نمودار ستونی نیز بدون قانون زمان محاسبه نمی‌شوند (نسخهٔ ۲٫۴)
+   151→      const emptyCharts = ['inventory-time-chart', 'setup-time-chart', 'setup-inventory-chart'];
+   152→      for (const id of emptyCharts) {
+   153→        Dashboard.disposeChart(id);
+   154→        const el = document.getElementById(id);
+   155→        if (el) el.innerHTML = `
+   156→          <div class="empty-state" style="min-height:220px">
+   157→            ${UI.icons.alert}
+   158→            <p>قانون زمان متالایز تعریف نشده — از تب «تنظیمات» قانون زمان اضافه کنید.</p>
+   159→          </div>`;
+   160→      }
+   161→    } else {
+   162→      document.getElementById('kpi-remaining-setup').textContent = U.hoursOf(s.totalRemainingSetupTime) !== null
+   163→        ? `${U.faNum(U.hoursOf(s.totalRemainingSetupTime))} ساعت`
+   164→        : '—';
+   165→      document.getElementById('kpi-remaining-setup-meta').innerHTML =
+   166→        `دقیق: ${U.faHMM(s.totalRemainingSetupTime)} · ` +
+   167→        `${U.faNum(s.timeRuleCoverage.covered)} رکورد دارای قانون` +
+   168→        (s.timeRuleCoverage.uncovered > 0
+   169→          ? ` · ⚠ ${U.faNum(s.timeRuleCoverage.uncovered)} رکورد بدون قانون`
+   170→          : '');
+   171→
+   172→      document.getElementById('kpi-remaining-produced').textContent = U.hoursOf(s.totalRemainingProducedTime) !== null
+   173→        ? `${U.faNum(U.hoursOf(s.totalRemainingProducedTime))} ساعت`
+   174→        : '—';
+   175→      document.getElementById('kpi-remaining-produced-meta').innerHTML =
+   176→        `دقیق: ${U.faHMM(s.totalRemainingProducedTime)} · تفاوت با ستاپ: ${U.faHMM(
+   177→          s.totalRemainingSetupTime - s.totalRemainingProducedTime
+   178→        )} (زمان رول‌های متالایزشده)`;
+   179→
+   180→      Dashboard.renderMachineTimeChart(state);
+   181→
+   182→      /* ---------- دو دونات زمان (نسخهٔ ۲٫۴ — جایگزین دونات وضعیت خام) ---------- */
+   183→      Dashboard.renderTimeDonuts(state);
+   184→
+   185→      /* ---------- نمودار ستونی مانده زمان موجودی همهٔ ستاپ‌ها (نسخهٔ ۲٫۴) ---------- */
+   186→      Dashboard.renderSetupInventoryColumnChart(state);
+   187→    }
+   188→
+   189→    const uncutValue = document.getElementById('kpi-uncut');
+   190→    uncutValue.textContent = U.faNum(s.totalUncut);
+   191→
+   192→    // فرمول شفاف برش‌نشده (§51 — مغایرت پنهان نمی‌شود)
+   193→    document.getElementById('kpi-uncut-meta').innerHTML =
+   194→      `Σ [ستاپ − (خام + متالایز)] = ${U.faNum(s.totalSetupRolls)} − ` +
+   195→      `(${U.faNum(s.rawMatchedCount)} + ${U.faNum(s.metallizedAllocated)})` +
+   196→      (s.totalConflict > 0
+   197→        ? `<br>⚠ مغایرت ظرفیت: ${U.faNum(s.totalConflict)} رول (در گزارش ستاپ‌ها)`
+   198→        : '');
+   199→
+   200→    // حالت هشدار کارت برش‌نشده (مغایرت ظرفیت)
+   201→    const uncutCard = uncutValue.closest('.kpi-card');
+   202→    uncutCard.classList.toggle('negative', s.totalConflict > 0);
+   203→
+   204→    /* ---------- مرکز هشدار کیفیت داده (§52 — B) ---------- */
+   205→    Dashboard.renderAlerts(state.warnings);
+   206→
+   207→    /* ---------- اطلاعات فایل‌ها (§12) ---------- */
+   208→    await Dashboard.renderImportBadges();
+   209→  };
+   210→
+   211→  /* ---------- چارت مانده زمان متالایز به تفکیک دستگاه (نسخهٔ ۲٫۳ — ECharts) ---------- */
+   212→
+   213→  /**
+   214→   * نمودار میله‌ای افقی گروهی ECharts — هر دستگاه (۱/۲/۳) دو میله:
+   215→   *   «مانده زمان ستاپ» (فیروزه‌ای) و «مانده زمان موجودی» (کهربایی).
+   216→   * نسخهٔ ۲٫۵ — راست‌به‌چپ: نام دستگاه‌ها در سمت راست (yAxis position:right)
+   217→   * و میله‌ها از راست (کنار نام‌ها) به چپ رشد می‌کنند (xAxis inverse).
+   218→   * Tooltip فارسی با مدت دقیق + برچسب ساعت روی محور. Fallback: میله‌های CSS.
+   219→   * زیر نمودار: آمار دوخطی (کمترین دستگاه + میانگین) — نسخهٔ ۲٫۴.
+   220→   */
+   221→  Dashboard.renderMachineTimeChart = function (state) {
+   222→    const s = state.summary;
+   223→    const machines = RM.config.VALID_MACHINES;
+   224→
+   225→    // بیشینه برای مقیاس
+   226→    let maxVal = 0;
+   227→    for (const m of machines) {
+   228→      const t = s.machineTime[m];
+   229→      if (t) maxVal = Math.max(maxVal, t.setup, t.produced);
+   230→    }
+   231→
+   232→    const chipsEl = document.getElementById('machine-time-chips');
+   233→    chipsEl.innerHTML = `
+   234→      <span class="chip">قوانین زمان: ${U.faNum(s.timeRulesCount)}</span>
+   235→      <span class="chip chip-strong">جمع مانده زمان ستاپ: ${U.faHMM(s.totalRemainingSetupTime)}</span>
+   236→      <span class="chip chip-ok">جمع مانده زمان موجودی: ${U.faHMM(s.totalRemainingProducedTime)}</span>
+   237→      ${s.timeRuleCoverage.uncovered > 0
+   238→        ? `<span class="chip chip-warn">${U.faNum(s.timeRuleCoverage.uncovered)} رکورد بدون قانون</span>`
+   239→        : ''}
+   240→    `;
+   241→
+   242→    /* ---------- آمار دوخطی زیر نمودار (نسخهٔ ۲٫۴) ----------
+   243→       خط ۱: دستگاهی که کمترین مانده زمان (موجودی) را دارد + هر دو زمان آن
+   244→       خط ۲: میانگین دستگاه‌ها (جمع ÷ تعداد دستگاه‌ها) + هر دو زمان
+   245→       همهٔ زمان‌ها با فرمت [H]:mm + معادل روزانه (روز ۲۴ ساعته) */
+   246→    const producedOf = (m) => (s.machineTime[m] ? s.machineTime[m].produced : 0);
+   247→    const setupOf = (m) => (s.machineTime[m] ? s.machineTime[m].setup : 0);
+   248→    let minMachine = machines[0];
+   249→    let minProduced = Infinity;
+   250→    for (const m of machines) {
+   251→      if (producedOf(m) < minProduced) { minProduced = producedOf(m); minMachine = m; }
+   252→    }
+   253→    const machineCount = machines.length;
+   254→    const avgProduced = s.totalRemainingProducedTime / machineCount;
+   255→    const avgSetup = s.totalRemainingSetupTime / machineCount;
+   256→
+   257→    const statPair = (producedMin, setupMin) => `
+   258→      <span class="mt-stat-pair">مانده زمان موجودی: <b>${U.faHMM(producedMin)}</b>
+   259→        <span class="mt-days">· معادل روزانه: ${U.faDaysOf(producedMin)}</span></span>
+   260→      <span class="mt-stat-arrow" aria-hidden="true">←</span>
+   261→      <span class="mt-stat-pair">مانده زمان ستاپ: <b>${U.faHMM(setupMin)}</b>
+   262→        <span class="mt-days">· معادل روزانه: ${U.faDaysOf(setupMin)}</span></span>`;
+   263→
+   264→    document.getElementById('machine-time-footer').innerHTML = `
+   265→      <div class="mt-stats">
+   266→        <div class="mt-stat-line">
+   267→          <span class="mt-stat-who">دستگاه دارای کمترین مانده زمان (دستگاه ${U.faNum(minMachine)})</span>
+   268→          <span class="mt-stat-arrow" aria-hidden="true">←</span>
+   269→          ${statPair(producedOf(minMachine), setupOf(minMachine))}
+   270→        </div>
+   271→        <div class="mt-stat-line">
+   272→          <span class="mt-stat-who">میانگین دستگاه‌ها (${U.faNum(machineCount)} دستگاه)</span>
+   273→          <span class="mt-stat-arrow" aria-hidden="true">←</span>
+   274→          ${statPair(avgProduced, avgSetup)}
+   275→        </div>
+   276→      </div>`;
+   277→
+   278→    if (!Dashboard.hasECharts()) {
+   279→      Dashboard.renderMachineTimeChartFallback(state);   // کتابخانه در دسترس نیست
+   280→      return;
+   281→    }
+   282→
+   283→    const P = Dashboard.chartPalette();
+   284→    const cats = machines.map((m) => `دستگاه ${U.faNumPlain(m)}`).reverse();   // دستگاه ۱ بالا
+   285→    const setupData = machines.map((m) => {
+   286→      const t = s.machineTime[m];
+   287→      return t && t.setup ? t.setup : 0;
+   288→    }).reverse();
+   289→    const producedData = machines.map((m) => {
+   290→      const t = s.machineTime[m];
+   291→      return t && t.produced ? t.produced : 0;
+   292→    }).reverse();
+   293→    const recordsByMachine = machines.map((m) => {
+   294→      const t = s.machineTime[m];
+   295→      return t ? t.records : 0;
+   296→    }).reverse();
+   297→
+   298→    const option = {
+   299→      animationDuration: 550,
+   300→      animationEasing: 'cubicOut',
+   301→      textStyle: { fontFamily: P.fontFamily },
+   302→      // نسخهٔ ۲٫۵: راست‌به‌چپ — میله‌ها از راست (کنار نام دستگاه‌ها) به چپ رشد می‌کنند
+   303→      grid: { left: 56, right: 8, top: 42, bottom: 8, containLabel: true },
+   304→      legend: {
+   305→        top: 4,
+   306→        right: 8,
+   307→        itemWidth: 14,
+   308→        itemHeight: 9,
+   309→        itemGap: 18,
+   310→        textStyle: { color: P.muted, fontFamily: P.fontFamily, fontSize: 11 },
+   311→        data: ['مانده زمان ستاپ', 'مانده زمان موجودی'],
+   312→      },
+   313→      tooltip: {
+   314→        trigger: 'axis',
+   315→        axisPointer: { type: 'shadow', shadowStyle: { color: P.splitLine } },
+   316→        backgroundColor: P.tooltipBg,
+   317→        borderColor: P.tooltipBorder,
+   318→        borderWidth: 1,
+   319→        padding: [8, 12],
+   320→        textStyle: { color: P.text, fontFamily: P.fontFamily, fontSize: 12 },
+   321→        formatter: (params) => {
+   322→          const idx = params[0] ? params[0].dataIndex : 0;
+   323→          const m = RM.config.VALID_MACHINES[machines.length - 1 - idx] || '—';
+   324→          const lines = [`<b>دستگاه ${U.faNumPlain(m)}</b> · ${U.faNum(recordsByMachine[idx] || 0)} رکورد`];
+   325→          for (const p of params) {
+   326→            lines.push(`${p.marker} ${p.seriesName}: <b>${U.faDuration(p.value)}</b>${p.value ? ` (~${U.faNum(Math.round(p.value / 60))} ساعت)` : ''}`);
+   327→          }
+   328→          return lines.join('<br>');
+   329→        },
+   330→      },
+   331→      xAxis: {
+   332→        type: 'value',
+   333→        inverse: true,                       // نسخهٔ ۲٫۵: صفر در راست → رشد به چپ
+   334→        max: (v) => Math.max(v.max * 1.08, 60),
+   335→        axisLabel: {
+   336→          color: P.muted,
+   337→          fontFamily: P.fontFamily,
+   338→          fontSize: 10.5,
+   339→          formatter: (v) => `${U.faNumPlain(Math.round(v / 60))} ساعت`,
+   340→        },
+   341→        splitLine: { lineStyle: { color: P.splitLine, width: 1 } },
+   342→        axisLine: { show: false },
+   343→        axisTick: { show: false },
+   344→      },
+   345→      yAxis: {
+   346→        type: 'category',
+   347→        position: 'right',                  // نسخهٔ ۲٫۵: نام دستگاه‌ها در سمت راست
+   348→        data: cats,
+   349→        axisLabel: { color: P.text, fontFamily: P.fontFamily, fontSize: 12, fontWeight: 600 },
+   350→        axisLine: { lineStyle: { color: P.axisLine } },
+   351→        axisTick: { show: false },
+   352→      },
+   353→      series: [
+   354→        {
+   355→          name: 'مانده زمان ستاپ',
+   356→          type: 'bar',
+   357→          data: setupData,
+   358→          barMaxWidth: 18,
+   359→          barGap: '28%',
+   360→          itemStyle: { color: P.setup, borderRadius: [4, 0, 0, 4] },
+   361→          emphasis: { itemStyle: { color: P.setup, opacity: 0.82 } },
+   362→          label: {
+   363→            show: true,
+   364→            position: 'left',              // نسخهٔ ۲٫۵: نوک میله (سمت چپ — رشد راست‌به‌چپ)
+   365→            color: P.muted,
+   366→            fontFamily: P.fontFamily,
+   367→            fontSize: 10,
+   368→            formatter: (p) => (p.value ? `${U.faNumPlain(Math.round(p.value / 60))} ساعت` : ''),
+   369→          },
+   370→        },
+   371→        {
+   372→          name: 'مانده زمان موجودی',
+   373→          type: 'bar',
+   374→          data: producedData,
+   375→          barMaxWidth: 18,
+   376→          itemStyle: { color: P.metal, borderRadius: [4, 0, 0, 4] },
+   377→          emphasis: { itemStyle: { color: P.metal, opacity: 0.82 } },
+   378→          label: {
+   379→            show: true,
+   380→            position: 'left',              // نسخهٔ ۲٫۵: نوک میله (سمت چپ — رشد راست‌به‌چپ)
+   381→            color: P.muted,
+   382→            fontFamily: P.fontFamily,
+   383→            fontSize: 10,
+   384→            formatter: (p) => (p.value ? `${U.faNumPlain(Math.round(p.value / 60))} ساعت` : ''),
+   385→          },
+   386→        },
+   387→      ],
+   388→    };
+   389→
+   390→    Dashboard.applyChart('machine-time-chart', option);
+   391→  };
+   392→
+   393→  /* ---------- دو دونات زمان متالایز (نسخهٔ ۲٫۴ — جایگزین دونات وضعیت خام) ----------
+   394→     زیر نمودار میله‌ای، دو دونات قرار می‌گیرد:
+   395→       ۱) دونات «مانده زمان موجودی» — سهم هر سه دستگاه + متن مرکزی دوخطی:
+   396→          بالا «کمترین: [H]:mm» و پایین «میانگین: [H]:mm»
+   397→       ۲) دونات «مانده زمان ستاپ» — همان ساختار با زمان‌های ستاپ
+   398→     میانگین = جمع دستگاه‌ها ÷ تعداد دستگاه‌ها.
+   399→     نسخهٔ ۲٫۵: مرکز دونات = مرکز بوم (center ۵۰٪/۵۰٪) و متن مرکزی با
+   400→     top:'middle' دقیقاً وسط‌چین می‌شود — مابین دو خط «کمترین/میانگین»؛
+   401→     رنگ دستگاه ۳ = آبی روشن #9FEDFF. */
+   402→
+   403→  /** ساخت و اعمال یک دونات زمان (سهم دستگاه‌ها + مرکز دوخطی کمترین/میانگین) */
+   404→  Dashboard.timeDonutOption = function (P, values, metricLabel) {
+   405→    const machines = RM.config.VALID_MACHINES;
+   406→    const total = values.reduce((a, b) => a + b, 0);
+   407→    const minVal = Math.min(...values);
+   408→    const avgVal = total / machines.length;
+   409→
+   410→    return {
+   411→      animationDuration: 550,
+   412→      textStyle: { fontFamily: P.fontFamily },
+   413→      tooltip: {
+   414→        trigger: 'item',
+   415→        backgroundColor: P.tooltipBg,
+   416→        borderColor: P.tooltipBorder,
+   417→        borderWidth: 1,
+   418→        padding: [8, 12],
+   419→        textStyle: { color: P.text, fontFamily: P.fontFamily, fontSize: 12 },
+   420→        formatter: (p) => `<b>${p.name}</b> — ${metricLabel}<br>${U.faHMM(p.value)}${
+   421→          p.value ? ` (~${U.faNumPlain(Math.round(p.value / 60))} ساعت · ${U.faDaysOf(p.value)})` : ''}`,
+   422→      },
+   423→      legend: {
+   424→        bottom: 2,
+   425→        left: 'center',
+   426→        itemWidth: 12,
+   427→        itemHeight: 12,
+   428→        itemGap: 14,
+   429→        textStyle: { color: P.muted, fontFamily: P.fontFamily, fontSize: 11 },
+   430→      },
+   431→      series: [
+   432→        {
+   433→          type: 'pie',
+   434→          radius: ['54%', '74%'],
+   435→          center: ['50%', '50%'],   // نسخهٔ ۲٫۵: مرکز دونات = مرکز بوم → متن مرکزی دقیقاً وسط
+   436→          avoidLabelOverlap: true,
+   437→          itemStyle: { borderColor: P.dark ? '#16181b' : '#fcfcfa', borderWidth: 2 },
+   438→          label: {
+   439→            show: true,
+   440→            color: P.muted,
+   441→            fontFamily: P.fontFamily,
+   442→            fontSize: 10.5,
+   443→            formatter: (p) => (p.value ? U.faHMM(p.value) : ''),   // نسخهٔ ۲٫۵: برچسب مقدار صفر مخفی
+   444→          },
+   445→          emphasis: {
+   446→            scale: true,
+   447→            scaleSize: 5,
+   448→            label: { show: true, fontWeight: 700 },
+   449→          },
+   450→          data: machines.map((m, i) => ({
+   451→            name: `دستگاه ${U.faNumPlain(m)}`,
+   452→            value: values[i],
+   453→            itemStyle: { color: RM.config.MACHINE_COLORS[m] || P.setup },
+   454→          })),
+   455→        },
+   456→      ],
+   457→      graphic: [
+   458→        {
+   459→          type: 'text',
+   460→          left: 'center',
+   461→          top: 'middle',              // نسخهٔ ۲٫۵: دقیقاً مرکز بوم = مرکز دونات
+   462→          style: {
+   463→            text: `کمترین: ${U.faHMM(minVal)}\nمیانگین: ${U.faHMM(avgVal)}`,
+   464→            textAlign: 'center',
+   465→            textVerticalAlign: 'middle',
+   466→            fill: P.text,
+   467→            fontFamily: P.fontFamily,
+   468→            fontSize: 12,
+   469→            fontWeight: 700,
+   470→            lineHeight: 19,
+   471→          },
+   472→        },
+   473→      ],
+   474→    };
+   475→  };
+   476→
+   477→  /** رندر دو دونات «مانده زمان موجودی» و «مانده زمان ستاپ» */
+   478→  Dashboard.renderTimeDonuts = function (state) {
+   479→    const s = state.summary;
+   480→    const machines = RM.config.VALID_MACHINES;
+   481→    const producedValues = machines.map((m) => (s.machineTime[m] ? s.machineTime[m].produced : 0));
+   482→    const setupValues = machines.map((m) => (s.machineTime[m] ? s.machineTime[m].setup : 0));
+   483→
+   484→    const hasAny = producedValues.some((v) => v > 0) || setupValues.some((v) => v > 0);
+   485→    if (!hasAny) {
+   486→      const emptyHtml = `
+   487→        <div class="empty-state" style="min-height:220px">
+   488→          ${UI.icons.alert}
+   489→          <p>هنوز رکوردی با قانون زمان متالایز تطبیق نشده — دونات‌ها پس از تطبیق رکوردها رندر می‌شوند.</p>
+   490→        </div>`;
+   491→      for (const id of ['inventory-time-chart', 'setup-time-chart']) {
+   492→        Dashboard.disposeChart(id);
+   493→        const el = document.getElementById(id);
+   494→        if (el) el.innerHTML = emptyHtml;
+   495→      }
+   496→      return;
+   497→    }
+   498→
+   499→    if (!Dashboard.hasECharts()) {
+   500→      // Fallback: چیپ‌های متنی هر دستگاه
+   501→      const rowsHtml = (vals) => machines.map((m, i) =>
+   502→        `<div class="mt-row"><div class="mt-label"><b style="color:${RM.config.MACHINE_COLORS[m]}">دستگاه ${U.faNum(m)}</b></div><b>${U.faHMM(vals[i])}</b></div>`
+   503→      ).join('');
+   504→      const inv = document.getElementById('inventory-time-chart');
+   505→      const stp = document.getElementById('setup-time-chart');
+   506→      if (inv) inv.innerHTML = `<div class="mt-rows" style="padding:12px">${rowsHtml(producedValues)}</div>`;
+   507→      if (stp) stp.innerHTML = `<div class="mt-rows" style="padding:12px">${rowsHtml(setupValues)}</div>`;
+   508→      return;
+   509→    }
+   510→
+   511→    const P = Dashboard.chartPalette();
+   512→    Dashboard.applyChart('inventory-time-chart', Dashboard.timeDonutOption(P, producedValues, 'مانده زمان موجودی'));
+   513→    Dashboard.applyChart('setup-time-chart', Dashboard.timeDonutOption(P, setupValues, 'مانده زمان ستاپ'));
+   514→  };
+   515→
+   516→  /* ---------- نمودار ستونی مانده زمان موجودی همهٔ ستاپ‌ها (نسخهٔ ۲٫۴ / ۲٫۵) ----------
+   517→     نسخهٔ ۲٫۵: به‌ازای هر ستاپ (شماره ستاپ) فقط یک میله — مجموع مانده زمان
+   518→     موجودی همهٔ رکوردهای همان شماره ستاپ (Σ [مدت × (تعداد − متالایز)]).
+   519→     رکوردهای بدون قانون زمان در مجموع لحاظ نمی‌شوند (Tooltip اعلام می‌کند). */
+   520→
+   521→  Dashboard.renderSetupInventoryColumnChart = function (state) {
+   522→    const report = state.setupReport;
+   523→    const el = document.getElementById('setup-inventory-chart');
+   524→    if (!el) return;
+   525→
+   526→    if (!report.length) {
+   527→      Dashboard.disposeChart('setup-inventory-chart');
+   528→      el.innerHTML = `
+   529→        <div class="empty-state" style="min-height:220px">
+   530→          ${UI.icons.alert}
+   531→          <p>هنوز ستاپی ثبت نشده — هر ستاپ (شماره ستاپ) یک میله از مجموع مانده زمان موجودی رکوردهایش خواهد بود.</p>
+   532→        </div>`;
+   533→      return;
+   534→    }
+   535→
+   536→    // مرتب‌سازی رکوردها: شماره ستاپ → دستگاه → عرض
+   537→    const sorted = [...report].sort((a, b) =>
+   538→      (a.setupNumber - b.setupNumber) ||
+   539→      (a.machineNumber - b.machineNumber) ||
+   540→      (a.width - b.width));
+   541→
+   542→    // گروه‌بندی بر اساس شماره ستاپ — یک میله برای هر ستاپ (نسخهٔ ۲٫۵)
+   543→    const groups = [];
+   544→    const bySetup = new Map();
+   545→    for (const r of sorted) {
+   546→      let g = bySetup.get(r.setupNumber);
+   547→      if (!g) {
+   548→        g = { setupNumber: r.setupNumber, records: [], total: 0, noRuleCount: 0 };
+   549→        bySetup.set(r.setupNumber, g);
+   550→        groups.push(g);
+   551→      }
+   552→      g.records.push(r);
+   553→      if (r.remainingProducedTime === null) {
+   554→        g.noRuleCount++;                       // رکورد بدون قانون زمان
+   555→      } else {
+   556→        g.total += r.remainingProducedTime;    // Σ [مدت × (تعداد − متالایز)]
+   557→      }
+   558→    }
+   559→
+   560→    const values = groups.map((g) => g.total);
+   561→
+   562→    if (!Dashboard.hasECharts()) {
+   563→      // Fallback: فهرست متنی — یک ردیف برای هر ستاپ (مجموع)
+   564→      el.innerHTML = `
+   565→        <div class="mt-rows" style="padding:12px; max-height:320px; overflow:auto">
+   566→          ${groups.map((g) => `<div class="mt-row"><div class="mt-label"><b>ستاپ ${U.faNum(g.setupNumber)}</b> · ${U.faNum(g.records.length)} رکورد</div><b>${U.faHMM(g.total)}</b></div>`).join('')}
+   567→        </div>`;
+   568→      return;
+   569→    }
+   570→
+   571→    const P = Dashboard.chartPalette();
+   572→    const showLabels = groups.length <= 14;
+   573→
+   574→    const option = {
+   575→      animationDuration: 550,
+   576→      textStyle: { fontFamily: P.fontFamily },
+   577→      grid: { left: 10, right: 16, top: 26, bottom: 8, containLabel: true },
+   578→      tooltip: {
+   579→        trigger: 'axis',
+   580→        axisPointer: { type: 'shadow', shadowStyle: { color: P.splitLine } },
+   581→        backgroundColor: P.tooltipBg,
+   582→        borderColor: P.tooltipBorder,
+   583→        borderWidth: 1,
+   584→        padding: [8, 12],
+   585→        textStyle: { color: P.text, fontFamily: P.fontFamily, fontSize: 12 },
+   586→        formatter: (params) => {
+   587→          const p = params[0];
+   588→          if (!p) return '';
+   589→          const g = groups[p.dataIndex];
+   590→          const recLines = g.records.slice(0, 6).map((r) =>
+   591→            `دستگاه ${U.faNum(r.machineNumber)} · عرض ${U.faWidth(r.width)} · تعداد ${U.faNum(r.rollCount)} · متالایز ${U.faNum(r.metallized)} → ${r.remainingProducedTime === null ? 'بدون قانون' : U.faHMM(r.remainingProducedTime)}`
+   592→          ).join('<br>');
+   593→          return `<b>ستاپ ${U.faNum(g.setupNumber)}</b> · ${U.faNum(g.records.length)} رکورد<br>` +
+   594→            `${recLines}${g.records.length > 6 ? `<br>… و ${U.faNum(g.records.length - 6)} رکورد دیگر` : ''}<br>` +
+   595→            `مجموع مانده زمان موجودی: <b>${U.faHMM(p.value)}</b>${p.value ? ` (~${U.faNumPlain(Math.round(p.value / 60))} ساعت)` : ''}` +
+   596→            (g.noRuleCount ? `<br>⚠ ${U.faNum(g.noRuleCount)} رکورد بدون قانون زمان` : '');
+   597→        },
+   598→      },
+   599→      xAxis: {
+   600→        type: 'category',
+   601→        data: groups.map((g) => U.faNumPlain(g.setupNumber)),
+   602→        axisLabel: {
+   603→          color: P.muted,
+   604→          fontFamily: P.fontFamily,
+   605→          fontSize: 10.5,
+   606→          hideOverlap: true,
+   607→          interval: 'auto',
+   608→        },
+   609→        axisLine: { lineStyle: { color: P.axisLine } },
+   610→        axisTick: { show: false },
+   611→        name: 'شماره ستاپ',
+   612→        nameLocation: 'middle',
+   613→        nameGap: 26,
+   614→        nameTextStyle: { color: P.faint, fontFamily: P.fontFamily, fontSize: 10.5 },
+   615→      },
+   616→      yAxis: {
+   617→        type: 'value',
+   618→        max: (v) => Math.max(v.max * 1.12, 60),
+   619→        axisLabel: {
+   620→          color: P.muted,
+   621→          fontFamily: P.fontFamily,
+   622→          fontSize: 10.5,
+   623→          formatter: (v) => `${U.faNumPlain(Math.round(v / 60))} ساعت`,
+   624→        },
+   625→        splitLine: { lineStyle: { color: P.splitLine, width: 1 } },
+   626→        axisLine: { show: false },
+   627→        axisTick: { show: false },
+   628→      },
+   629→      series: [
+   630→        {
+   631→          name: 'مانده زمان موجودی',
+   632→          type: 'bar',
+   633→          data: values,
+   634→          barMaxWidth: 34,
+   635→          itemStyle: { color: P.metal, borderRadius: [5, 5, 0, 0] },
+   636→          emphasis: { itemStyle: { color: P.metal, opacity: 0.82 } },
+   637→          label: showLabels
+   638→            ? {
+   639→                show: true,
+   640→                position: 'top',
+   641→                color: P.muted,
+   642→                fontFamily: P.fontFamily,
+   643→                fontSize: 9.5,
+   644→                formatter: (p) => (p.value ? U.faHMM(p.value) : ''),
+   645→              }
+   646→            : { show: false },
+   647→        },
+   648→      ],
+   649→    };
+   650→
+   651→    Dashboard.applyChart('setup-inventory-chart', option);
+   652→  };
+   653→
+   654→  /* ---------- Fallback قدیمی: میله‌های CSS (نبود ECharts) ---------- */
+   655→
+   656→  Dashboard.renderMachineTimeChartFallback = function (state) {
+   657→    const s = state.summary;
+   658→    const machines = RM.config.VALID_MACHINES;
+   659→
+   660→    let maxVal = 0;
+   661→    for (const m of machines) {
+   662→      const t = s.machineTime[m];
+   663→      if (t) maxVal = Math.max(maxVal, t.setup, t.produced);
+   664→    }
+   665→    if (maxVal === 0) maxVal = 1;
+   666→
+   667→    const rows = machines.map((m) => {
+   668→      const t = s.machineTime[m] || { setup: 0, produced: 0, records: 0 };
+   669→      const setupPct = Math.max(2, Math.round((t.setup / maxVal) * 100));
+   670→      const producedPct = Math.max(2, Math.round((t.produced / maxVal) * 100));
+   671→      const hasData = t.records > 0;
+   672→
+   673→      return `
+   674→        <div class="mt-row" data-machine="${m}">
+   675→          <div class="mt-label">
+   676→            <b>دستگاه ${U.faNum(m)}</b>
+   677→            <span class="muted mt-records">${hasData ? `${U.faNum(t.records)} رکورد` : 'بدون رکورد مطابق'}</span>
+   678→          </div>
+   679→          <div class="mt-bars">
+   680→            <div class="mt-bar-line">
+   681→              <span class="mt-legend-setup" title="مانده زمان ستاپ = مدت زمان × تعداد">ستاپ</span>
+   682→              <div class="mt-track">
+   683→                <div class="mt-bar mt-bar-setup" style="width:${hasData ? setupPct : 0}%"></div>
+   684→              </div>
+   685→              <span class="mt-val">${U.faDuration(t.setup)}</span>
+   686→            </div>
+   687→            <div class="mt-bar-line">
+   688→              <span class="mt-legend-produced" title="مانده زمان موجودی = مدت زمان × (تعداد − متالایز)">موجودی</span>
+   689→              <div class="mt-track">
+   690→                <div class="mt-bar mt-bar-produced" style="width:${hasData ? producedPct : 0}%"></div>
+   691→              </div>
+   692→              <span class="mt-val">${U.faDuration(t.produced)}</span>
+   693→            </div>
+   694→          </div>
+   695→        </div>`;
+   696→    }).join('');
+   697→
+   698→    document.getElementById('machine-time-chart').innerHTML = `
+   699→      <div class="mt-legend-bar">
+   700→        <span class="mt-legend-item"><span class="mt-dot mt-dot-setup"></span> مانده زمان ستاپ (مدت زمان × تعداد)</span>
+   701→        <span class="mt-legend-item"><span class="mt-dot mt-dot-produced"></span> مانده زمان موجودی (مدت زمان × (تعداد − متالایز))</span>
+   702→      </div>
+   703→      <div class="mt-rows">${rows}</div>`;
+   704→  };
+   705→
+   706→  /* ---------- مرکز هشدار + Drill-down رکوردهای عامل (§8 اصلاحات) ---------- */
+   707→
+   708→  const SEVERITY_META = {
+   709→    error: { label: 'خطا', cls: 'alert-error' },
+   710→    warning: { label: 'هشدار', cls: 'alert-warning' },
+   711→  };
+   712→
+   713→  Dashboard.renderAlerts = function (warnings) {
+   714→    const wrap = document.getElementById('alerts-list');
+   715→    const panel = document.getElementById('alerts-panel');
+   716→
+   717→    if (!warnings.length) {
+   718→      panel.hidden = true;
+   719→      wrap.innerHTML = '';
+   720→      return;
+   721→    }
+   722→
+   723→    panel.hidden = false;
+   724→    document.getElementById('alerts-count').textContent = U.faNum(warnings.length);
+   725→
+   726→    wrap.innerHTML = warnings.map((w) => {
+   727→      const meta = SEVERITY_META[w.severity] || SEVERITY_META.warning;
+   728→      const hasDrill = !!w.drill;
+   729→      return `
+   730→        <div class="alert-item ${meta.cls}" role="alert" data-alert="${U.escapeHtml(w.type)}">
+   731→          <span class="alert-badge">${meta.label}</span>
+   732→          <div class="alert-body">
+   733→            <b>${U.escapeHtml(w.title)}</b>
+   734→            <p>${U.escapeHtml(w.detail)}</p>
+   735→          </div>
+   736→          ${hasDrill
+   737→            ? `<button type="button" class="btn btn-ghost btn-sm" data-alert-drill="${U.escapeHtml(w.type)}" title="نمایش رکوردهای عامل این هشدار">مشاهدهٔ رکوردها</button>`
+   738→            : (w.action
+   739→              ? `<button type="button" class="btn btn-ghost btn-sm" data-alert-action="${w.action}">مشاهده</button>`
+   740→              : '')}
+   741→        </div>`;
+   742→    }).join('');
+   743→
+   744→    // دکمهٔ «مشاهدهٔ رکوردها» → Drill-down دقیق رکوردهای عامل همان هشدار
+   745→    wrap.querySelectorAll('[data-alert-drill]').forEach((btn) => {
+   746→      btn.addEventListener('click', () => {
+   747→        const w = warnings.find((x) => x.type === btn.dataset.alertDrill);
+   748→        if (w) Dashboard.openDrill(w);
+   749→      });
+   750→    });
+   751→
+   752→    // هشدارهای بدون Drill → رفتن به بخش مرتبط (رفتار قبلی حفظ شد)
+   753→    wrap.querySelectorAll('[data-alert-action]').forEach((btn) => {
+   754→      btn.addEventListener('click', () => UI.switchTab(btn.dataset.alertAction));
+   755→    });
+   756→  };
+   757→
+   758→  /**
+   759→   * بازکردن Drill-down یک هشدار — دقیقاً رکوردهای عامل همان Rule.
+   760→   * موجودیت‌های Roll از مودال مشترک با ستون‌های Mapping استفاده می‌کنند؛
+   761→   * هشدارهای مربوط به ستاپ/قانون جدول اختصاصی خودشان را می‌گیرند.
+   762→   */
+   763→  Dashboard.openDrill = async function (warning) {
+   764→    const d = warning.drill;
+   765→    if (!d) return;
+   766→
+   767→    try {
+   768→      /* --- هشدارهای مربوط به ستاپ‌ها --- */
+   769→      if (d.source === 'setups') {
+   770→        const state = Dashboard._state;
+   771→        const rows = (d.filter === 'capacity-conflict')
+   772→          ? state.setupReport.filter((r) => r.conflict > 0)
+   773→          : (d.filter === 'no-time-rule')
+   774→            ? state.setupReport.filter((r) => r.remainingSetupTime === null)
+   775→            : state.setupReport.filter((r) => r.thickness === null || r.standardLength === null);
+   776→
+   777→        const timeCols = (d.filter === 'no-time-rule')
+   778→          ? '<th>مانده زمان</th>'
+   779→          : '<th>خام</th><th>متالایز</th><th>مغایرت</th>';
+   780→
+   781→        UI.infoModal(warning.title, `
+   782→          <div class="drill-subtitle"><b>${U.faNum(rows.length)}</b> رکورد ستاپ</div>
+   783→          <div class="table-wrap table-scroll" style="max-height:420px">
+   784→            <table class="data-table">
+   785→              <thead><tr><th>ستاپ</th><th>دستگاه</th><th>عرض</th><th>ضخامت</th><th>متراژ استاندارد</th><th>تعداد</th>${timeCols}</tr></thead>
+   786→              <tbody>${rows.map((r) => `
+   787→                <tr>
+   788→                  <td>${U.faNum(r.setupNumber)}</td>
+   789→                  <td>${U.faNum(r.machineNumber)}</td>
+   790→                  <td>${U.faWidth(r.width)}</td>
+   791→                  <td>${r.thickness === null ? '<span class="muted">ناقص</span>' : U.faNum(r.thickness)}</td>
+   792→                  <td>${r.standardLength === null ? '<span class="muted">ناقص</span>' : U.faNum(r.standardLength)}</td>
+   793→                  <td class="count-cell">${U.faNum(r.rollCount)}</td>
+   794→                  ${d.filter === 'no-time-rule'
+   795→                    ? `<td><span class="muted">بدون قانون زمان</span></td>`
+   796→                    : `<td>${U.faNum(r.rawExisting)}</td>
+   797→                       <td>${U.faNum(r.metallized)}</td>
+   798→                       <td>${r.conflict > 0 ? `<span class="pill-bad status-pill">⚠ ${U.faNum(r.conflict)}</span>` : '—'}</td>`}
+   799→                </tr>`).join('')}
+   800→              </tbody>
+   801→            </table>
+   802→          </div>
+   803→        `);
+   804→        return;
+   805→      }
+   806→
+   807→      /* --- هشدار هم‌پوشانی قوانین --- */
+   808→      if (d.source === 'rules') {
+   809→        UI.infoModal(warning.title, `
+   810→          <div class="drill-subtitle"><b>${U.faNum(d.pairs.length)}</b> جفت قانون هم‌پوشان</div>
+   811→          <div class="table-wrap">
+   812→            <table class="data-table">
+   813→              <thead><tr><th>ضخامت</th><th>بازهٔ قانون ۱</th><th>بازهٔ قانون ۲</th></tr></thead>
+   814→              <tbody>${d.pairs.map(([a, b]) => `
+   815→                <tr>
+   816→                  <td class="thickness-cell">${U.faNum(a.thickness)}</td>
+   817→                  <td>${U.faNum(a.minLength)} تا ${U.faNum(a.maxLength)} → ${U.faNum(a.standardLength)}</td>
+   818→                  <td>${U.faNum(b.minLength)} تا ${U.faNum(b.maxLength)} → ${U.faNum(b.standardLength)}</td>
+   819→                </tr>`).join('')}
+   820→              </tbody>
+   821→            </table>
+   822→          </div>
+   823→        `);
+   824→        return;
+   825→      }
+   826→
+   827→      /* --- هشدارهای رکوردی (rolls / archived) → مودال مشترک --- */
+   828→      const sourceKey = d.source;
+   829→      const table = RM.config.IMPORT_TARGETS[sourceKey].table;
+   830→      let records = [];
+   831→
+   832→      if (d.issue) {
+   833→        // نقص دادهٔ مستقیم: بدون عرض / بدون متراژ / بدون ضخامت / شماره رول / نوع فیلم
+   834→        // رزولور مشترک نقص‌ها («length» → actualLength در مدل داخلی)
+   835→        const all = await db[table].toArray();
+   836→        records = RM.normalize.recordsWithIssue(all, d.issue);
+   837→      } else if (d.filter === 'all') {
+   838→        // Mapping ناقص — همهٔ رکوردهای همان Dataset (فیلدهای مفقود «—» نمایش داده می‌شوند)
+   839→        records = await db[table].toArray();
+   840→      } else if (d.filter === 'no-rule') {
+   841→        // رول‌های خام بدون قانون متراژ — از گروه‌های بدون قانون (کلید‌محور)
+   842→        const state = Dashboard._state;
+   843→        const groups = state.rawRollGroups.filter((g) => !g.hasRule);
+   844→        const ids = groups.flatMap((g) => g.rollIds);
+   845→        records = (await db.rolls.bulkGet(ids)).filter(Boolean);
+   846→      } else if (d.filter === 'group') {
+   847→        // گروه‌های خاص (بدون ستاپ / مازاد خام)
+   848→        const state = Dashboard._state;
+   849→        const keySet = new Set(d.groupKeys || []);
+   850→        const groups = state.rawRollGroups.filter((g) => keySet.has(g.key));
+   851→        const ids = groups.flatMap((g) => g.rollIds);
+   852→        records = (await db.rolls.bulkGet(ids)).filter(Boolean);
+   853→      } else if (d.filter === 'metallized-unallocated') {
+   854→        // مازاد متالایز — یونیک‌های دارای کلیدِ تخصیص‌نیافته
+   855→        const state = Dashboard._state;
+   856→        const keySet = new Set(d.groupKeys || []);
+   857→        records = state.metallizedUniqueRecords.filter((r) =>
+   858→          keySet.has(U.formatKey(r.width, r.setupNumber))
+   859→        );
+   860→      }
+   861→
+   862→      await UI.recordsDrillModal(warning.title, records, { source: sourceKey });
+   863→    } catch (err) {
+   864→      console.error('[Drill-down]', err);
+   865→      UI.toast('نمایش رکوردهای این هشدار با خطا مواجه شد.', 'error');
+   866→    }
+   867→  };
+   868→
+   869→  /* ---------- اطلاعات آخرین Import (§12 — عنوان کاربرپسنده + نام فایل برای Audit) ---------- */
+   870→
+   871→  Dashboard.renderImportBadges = async function () {
+   872→    for (const targetKey of ['rolls', 'archived']) {
+   873→      const el = document.getElementById(`kpi-file-${targetKey}`);
+   874→      if (!el) continue;
+   875→
+   876→      const entries = await db.importMetadata
+   877→        .where('target').equals(targetKey)
+   878→        .reverse()
+   879→        .sortBy('importedAt');
+   880→      const info = entries[0];
+   881→
+   882→      el.innerHTML = info
+   883→        ? `${U.escapeHtml(RM.config.DATASET_LABELS[targetKey])} — <code>${U.escapeHtml(U.truncate(info.fileName, 28))}</code> · ${U.faNum(info.totalRecords)} رکورد · ${U.faDate(info.importedAt)}`
+   884→        : '<span class="muted">فایلی بارگذاری نشده</span>';
+   885→    }
+   886→  };
+   887→
+   888→  RM.views = RM.views || {};
+   889→  RM.views.dashboard = Dashboard;
+   890→})();
+   891→
