@@ -1,0 +1,708 @@
+     1→/* =========================================================================
+     2→   views/lists.js — زبانه‌های لیست رول‌ها در صفحهٔ «ورود داده‌ها» (تغییر ۳)
+     3→   -------------------------------------------------------------------------
+     4→   سه زبانه زیر دو کادر Import (مانند زبانه‌های صفحهٔ «رول‌ها»):
+     5→     ۱) «لیست رول های موجود»  — جدول همهٔ اطلاعات فایل رول‌های موجود
+     6→     ۲) «لیست سابقه رول ها»   — جدول همهٔ اطلاعات فایل سابقه (آرشیو)
+     7→     ۳) «رول‌های ویرایش‌شده»   — لیست رول‌های ویرایش‌شده + اطلاعات ویرایش
+     8→   امکانات هر جدول (دقیقاً مانند «گزارش تولید ستاپ‌ها»):
+     9→     - فیلتر «شامل بودن» زیر هر ستون (داینامیک با عرض ستون + دکمهٔ «≠»)
+    10→     - پنل مرتب‌سازی چندمرحله‌ای (کشیدنی + ماندگار)
+    11→     - پنل ترتیب ستون‌ها (کشیدنی + عرض px + «نمایش/مخفی‌کردن هر ستون»)
+    12→     - ویرایش هر رکورد (مودال تمام فیلدها → ذخیرهٔ ماندگار در جدول rollEdits)
+    13→   اطلاعات ویرایش‌شده از آن پس جایگزین اطلاعات فایل ایمپورت‌شده می‌شود
+    14→   (اعمال مرکزی در DB.loadAllSources — داشبورد/گزارش‌ها هم به‌روز می‌شوند)
+    15→   ========================================================================= */
+    16→
+    17→'use strict';
+    18→
+    19→(function () {
+    20→  const U = RM.utils;
+    21→  const UI = RM.ui;
+    22→  const DB = RM.db;
+    23→  const db = RM.db.db;
+    24→  const N = RM.normalize;
+    25→
+    26→  /** فیلدهای متنی فرم ویرایش (بقیه از config — عددی/صحیح) */
+    27→  const TEXT_FIELDS = [
+    28→    'rollNumber', 'filmType', 'palletNumber', 'productionDate', 'grade', 'status',
+    29→  ];
+    30→
+    31→  const ListsView = {
+    32→    /* وضعیت هر منبع — مستقل از دیگری */
+    33→    state: {
+    34→      rolls: {
+    35→        sortPipeline: null, filters: {}, sortPanelVisible: true, colsPanelVisible: true,
+    36→        columnOrder: null, columnWidths: null, hiddenCols: null, visibleRows: null,
+    37→      },
+    38→      archived: {
+    39→        sortPipeline: null, filters: {}, sortPanelVisible: true, colsPanelVisible: true,
+    40→        columnOrder: null, columnWidths: null, hiddenCols: null, visibleRows: null,
+    41→      },
+    42→    },
+    43→    editing: null,     // { sourceKey, recordId, imported, effective, editKey }
+    44→    _editedPage: 1,    // صفحهٔ جدول رول‌های ویرایش‌شده
+    45→  };
+    46→
+    47→  /* ================================================================
+    48→     ۱) راه‌اندازی
+    49→     ================================================================ */
+    50→
+    51→  ListsView.init = async function () {
+    52→    /* --- بارگذاری وضعیت ماندگار هر منبع --- */
+    53→    for (const src of ['rolls', 'archived']) {
+    54→      const st = ListsView.state[src];
+    55→      st.sortPipeline = await DB.getSetting(`list${cap(src)}Sort`, RM.config.LIST_DEFAULT_SORT);
+    56→      st.sortPanelVisible = await DB.getSetting(`list${cap(src)}SortPanelVisible`, true);
+    57→      st.colsPanelVisible = await DB.getSetting(`list${cap(src)}ColsPanelVisible`, true);
+    58→      st.visibleRows = await DB.getSetting(`list${cap(src)}VisibleRows`, RM.config.LIST_VISIBLE_ROWS);
+    59→
+    60→      st.columnOrder = await DB.getSetting(
+    61→        `list${cap(src)}ColumnOrder`, RM.config.LIST_DEFAULT_COLUMN_ORDER[src]);
+    62→      st.columnWidths = Object.assign(
+    63→        {}, RM.config.LIST_DEFAULT_COLUMN_WIDTHS,
+    64→        (await DB.getSetting(`list${cap(src)}ColumnWidths`, {})) || {}
+    65→      );
+    66→      st.hiddenCols = await DB.getSetting(`list${cap(src)}HiddenCols`, []) || [];
+    67→
+    68→      /* --- مهاجرت نرم: کلیدهای جدید در جایگاه منطقی درج می‌شوند --- */
+    69→      if (Array.isArray(st.columnOrder)) {
+    70→        const defaults = RM.config.LIST_DEFAULT_COLUMN_ORDER[src];
+    71→        const missing = defaults.filter((k) => !st.columnOrder.includes(k));
+    72→        for (const key of missing) {
+    73→          const prevIndex = defaults.indexOf(key) - 1;
+    74→          const anchor = prevIndex >= 0 ? defaults[prevIndex] : null;
+    75→          const at = anchor !== null ? st.columnOrder.indexOf(anchor) : -1;
+    76→          if (at !== -1) st.columnOrder.splice(at + 1, 0, key);
+    77→          else st.columnOrder.push(key);
+    78→        }
+    79→        if (missing.length) await DB.setSetting(`list${cap(src)}ColumnOrder`, st.columnOrder);
+    80→      }
+    81→
+    82→      ListsView.bindPanels(src);
+    83→    }
+    84→
+    85→    /* --- زبانه‌های داخلی (محدود به همین صفحه — تداخلی با زبانه‌های «رول‌ها» ندارد) --- */
+    86→    document.querySelectorAll('#view-import .subtab-btn').forEach((btn) => {
+    87→      btn.addEventListener('click', () => {
+    88→        document.querySelectorAll('#view-import .subtab-btn').forEach((b) => {
+    89→          const active = b === btn;
+    90→          b.classList.toggle('active', active);
+    91→          b.setAttribute('aria-selected', String(active));
+    92→        });
+    93→        const target = btn.dataset.ilsubview;
+    94→        document.querySelectorAll('#view-import .il-subview').forEach((el) => {
+    95→          const active = el.id === `ilsubview-${target}`;
+    96→          el.classList.toggle('active', active);
+    97→          el.hidden = !active;
+    98→        });
+    99→      });
+   100→    });
+   101→
+   102→    /* --- مودال ویرایش --- */
+   103→    document.getElementById('modal-edit-cancel').addEventListener('click', () => ListsView.closeEditModal());
+   104→    document.getElementById('modal-edit-save').addEventListener('click', () => ListsView.saveEditModal());
+   105→    document.getElementById('modal-edit').addEventListener('click', (e) => {
+   106→      if (e.target === e.currentTarget) ListsView.closeEditModal();
+   107→    });
+   108→    document.addEventListener('keydown', (e) => {
+   109→      if (e.key === 'Escape' && !document.getElementById('modal-edit').hidden) ListsView.closeEditModal();
+   110→    });
+   111→  };
+   112→
+   113→  /** حرف اول بزرگ (برای کلیدهای تنظیمات: rolls → Rolls) */
+   114→  function cap(s) {
+   115→    return s.charAt(0).toUpperCase() + s.slice(1);
+   116→  }
+   117→
+   118→  /** اتصال دکمه‌ها/پنل‌های یک منبع */
+   119→  ListsView.bindPanels = function (src) {
+   120→    const st = ListsView.state[src];
+   121→    const id = (suffix) => document.getElementById(`list-${suffix}-${src}`);
+   122→
+   123→    /* --- پنل مرتب‌سازی: افزودن/بازنشانی --- */
+   124→    const addSelect = id('sort-add-select');
+   125→    if (addSelect) {
+   126→      addSelect.innerHTML = '<option value="">افزودن فیلد…</option>' +
+   127→        Object.entries(RM.config.LIST_SORTABLE_FIELDS)
+   128→          .filter(([k]) => ListsView.editableFields(src).includes(k) || k === 'width' || k === 'cutWidth')
+   129→          .map(([k, v]) => `<option value="${k}">${U.escapeHtml(v.label)}</option>`)
+   130→          .join('');
+   131→
+   132→      id('sort-add-btn').addEventListener('click', () => {
+   133→        const field = addSelect.value;
+   134→        if (!field) return;
+   135→        if (st.sortPipeline.some((s) => s.field === field)) {
+   136→          UI.toast('این فیلد قبلاً به مرتب‌سازی اضافه شده است.', 'info');
+   137→          return;
+   138→        }
+   139→        st.sortPipeline.push({ field, direction: 'asc' });
+   140→        DB.setSetting(`list${cap(src)}Sort`, st.sortPipeline);
+   141→        ListsView.renderTable(src);
+   142→      });
+   143→
+   144→      id('sort-reset-btn').addEventListener('click', async () => {
+   145→        st.sortPipeline = JSON.parse(JSON.stringify(RM.config.LIST_DEFAULT_SORT));
+   146→        await DB.setSetting(`list${cap(src)}Sort`, st.sortPipeline);
+   147→        ListsView.renderTable(src);
+   148→        UI.toast('مرتب‌سازی به حالت پیش‌فرض بازگشت.', 'info');
+   149→      });
+   150→    }
+   151→
+   152→    /* --- نمایش/مخفی پنل‌ها --- */
+   153→    id('sort-toggle').addEventListener('click', () => {
+   154→      st.sortPanelVisible = !st.sortPanelVisible;
+   155→      DB.setSetting(`list${cap(src)}SortPanelVisible`, st.sortPanelVisible);
+   156→      ListsView.applyPanelVisibility(src);
+   157→    });
+   158→    id('cols-toggle').addEventListener('click', () => {
+   159→      st.colsPanelVisible = !st.colsPanelVisible;
+   160→      DB.setSetting(`list${cap(src)}ColsPanelVisible`, st.colsPanelVisible);
+   161→      ListsView.applyPanelVisibility(src);
+   162→    });
+   163→
+   164→    /* --- بازنشانی ترتیب/عرض/نمایش ستون‌ها --- */
+   165→    id('cols-reset-btn').addEventListener('click', async () => {
+   166→      st.columnOrder = [...RM.config.LIST_DEFAULT_COLUMN_ORDER[src]];
+   167→      st.columnWidths = { ...RM.config.LIST_DEFAULT_COLUMN_WIDTHS };
+   168→      st.hiddenCols = [];
+   169→      await DB.setSetting(`list${cap(src)}ColumnOrder`, st.columnOrder);
+   170→      await DB.setSetting(`list${cap(src)}ColumnWidths`, st.columnWidths);
+   171→      await DB.setSetting(`list${cap(src)}HiddenCols`, st.hiddenCols);
+   172→      ListsView.renderTable(src);
+   173→      UI.toast('ترتیب، عرض و نمایش ستون‌ها به حالت پیش‌فرض بازگشت.', 'info');
+   174→    });
+   175→
+   176→    ListsView.applyPanelVisibility(src);
+   177→  };
+   178→
+   179→  /** اعمال نمایش/مخفی پنل‌های یک منبع */
+   180→  ListsView.applyPanelVisibility = function (src) {
+   181→    const st = ListsView.state[src];
+   182→    const id = (suffix) => document.getElementById(`list-${suffix}-${src}`);
+   183→
+   184→    const sortBuilder = id('sort-builder');
+   185→    const sortToggle = id('sort-toggle');
+   186→    if (sortBuilder && sortToggle) {
+   187→      sortBuilder.hidden = !st.sortPanelVisible;
+   188→      sortToggle.setAttribute('aria-expanded', String(st.sortPanelVisible));
+   189→      sortToggle.innerHTML = st.sortPanelVisible
+   190→        ? `${UI.icons.cross} مخفی‌کردن پنل مرتب‌سازی`
+   191→        : `${UI.icons.plus} نمایش پنل مرتب‌سازی`;
+   192→    }
+   193→
+   194→    const colsBuilder = id('cols-builder');
+   195→    const colsToggle = id('cols-toggle');
+   196→    if (colsBuilder && colsToggle) {
+   197→      colsBuilder.hidden = !st.colsPanelVisible;
+   198→      colsToggle.setAttribute('aria-expanded', String(st.colsPanelVisible));
+   199→      colsToggle.innerHTML = st.colsPanelVisible
+   200→        ? `${UI.icons.cross} مخفی‌کردن پنل ترتیب ستون‌ها`
+   201→        : `${UI.icons.plus} نمایش پنل ترتیب ستون‌ها`;
+   202→    }
+   203→  };
+   204→
+   205→  /** فیلدهای موجود برای یک منبع (archived فاقد cutWidth است) */
+   206→  ListsView.editableFields = function (src) {
+   207→    return RM.config.LIST_DEFAULT_COLUMN_ORDER[src].filter((k) => k !== 'actions');
+   208→  };
+   209→
+   210→  /* ================================================================
+   211→     ۲) رجیستری ستون‌ها + رندر جدول لیست هر منبع
+   212→     ================================================================ */
+   213→
+   214→  /** رجیستری ستون‌های جدول لیست — برچسب‌ها از Mapping کاربر */
+   215→  ListsView.columnRegistry = async function (src) {
+   216→    const st = ListsView.state[src];
+   217→    const widths = st.columnWidths || {};
+   218→    const labels = await N.effectiveColumnLabels(src);
+   219→    const L = (k) => U.escapeHtml(labels[k] || RM.config.FIELD_LABELS[k] || k);
+   220→
+   221→    /** پوشش «✎ ویرایش‌شده» روی مقدار سلول‌های ویرایش‌شده */
+   222→    const wrap = (r, key, html) =>
+   223→      (r.__editedFields && r.__editedFields.includes(key)
+   224→        ? `<span class="edited-val" title="این فیلد ویرایش شده و جایگزین اطلاعات فایل است">${html}</span>`
+   225→        : html);
+   226→
+   227→    const NUM = (r, key, fmt) =>
+   228→      wrap(r, key, r[key] === null || r[key] === undefined || r[key] === ''
+   229→        ? '<span class="muted">—</span>' : fmt(r[key]));
+   230→
+   231→    const registry = {
+   232→      rollNumber: {
+   233→        key: 'rollNumber', label: L('rollNumber'), className: 'ltr em-cell',
+   234→        render: (r) => wrap(r, 'rollNumber', U.escapeHtml(r.rollNumber || '—')),
+   235→        tokens: (r) => [r.rollNumber ?? ''],
+   236→      },
+   237→      width: {
+   238→        key: 'width', label: L('width'), className: 'em-cell',
+   239→        render: (r) => NUM(r, 'width', (v) => U.faWidth(v)),
+   240→        tokens: (r) => [U.faWidth(r.width), String(r.width ?? '')],
+   241→      },
+   242→      cutWidth: {
+   243→        key: 'cutWidth', label: L('cutWidth'), className: 'em-cell',
+   244→        render: (r) => NUM(r, 'cutWidth', (v) => U.faWidth(v)),
+   245→        tokens: (r) => [U.faWidth(r.cutWidth), String(r.cutWidth ?? '')],
+   246→      },
+   247→      actualLength: {
+   248→        key: 'actualLength', label: L('actualLength'),
+   249→        render: (r) => NUM(r, 'actualLength', (v) => U.faNum(v)),
+   250→        tokens: (r) => [U.faNum(r.actualLength), String(r.actualLength ?? '')],
+   251→      },
+   252→      thickness: {
+   253→        key: 'thickness', label: L('thickness'),
+   254→        render: (r) => NUM(r, 'thickness', (v) => U.faNum(v)),
+   255→        tokens: (r) => [U.faNum(r.thickness), String(r.thickness ?? '')],
+   256→      },
+   257→      filmType: {
+   258→        key: 'filmType', label: L('filmType'),
+   259→        render: (r) => wrap(r, 'filmType', r.filmType
+   260→          ? (N.hasR(r.filmType)
+   261→            ? `<span class="film-r">${U.escapeHtml(r.filmType)}</span>`
+   262→            : U.escapeHtml(r.filmType))
+   263→          : '<span class="muted">—</span>'),
+   264→        tokens: (r) => [r.filmType ?? ''],
+   265→      },
+   266→      palletNumber: {
+   267→        key: 'palletNumber', label: L('palletNumber'), className: 'ltr',
+   268→        render: (r) => wrap(r, 'palletNumber', U.escapeHtml(r.palletNumber || '—')),
+   269→        tokens: (r) => [r.palletNumber ?? ''],
+   270→      },
+   271→      setupNumber: {
+   272→        key: 'setupNumber', label: L('setupNumber'),
+   273→        render: (r) => NUM(r, 'setupNumber', (v) => U.faNum(v)),
+   274→        tokens: (r) => [U.faNum(r.setupNumber), String(r.setupNumber ?? '')],
+   275→      },
+   276→      productionDate: {
+   277→        key: 'productionDate', label: L('productionDate'),
+   278→        render: (r) => wrap(r, 'productionDate', U.escapeHtml(U.faDateTime(r.productionDate))),
+   279→        tokens: (r) => [U.faDateTime(r.productionDate), String(r.productionDate ?? '')],
+   280→      },
+   281→      netWeight: {
+   282→        key: 'netWeight', label: L('netWeight'),
+   283→        render: (r) => NUM(r, 'netWeight', (v) => U.faNum(v)),
+   284→        tokens: (r) => [U.faNum(r.netWeight), String(r.netWeight ?? '')],
+   285→      },
+   286→      grade: {
+   287→        key: 'grade', label: L('grade'), className: 'ltr',
+   288→        render: (r) => wrap(r, 'grade', U.escapeHtml(r.grade || '—')),
+   289→        tokens: (r) => [r.grade ?? ''],
+   290→      },
+   291→      status: {
+   292→        key: 'status', label: L('status'),
+   293→        render: (r) => wrap(r, 'status', U.escapeHtml(r.status || '—')),
+   294→        tokens: (r) => [r.status ?? ''],
+   295→      },
+   296→      actions: {
+   297→        key: 'actions', label: 'عملیات', filterable: false,
+   298→        render: (r) => `
+   299→          <div class="row-actions">
+   300→            <button type="button" class="btn btn-ghost btn-icon" data-list-edit="${r.id}" data-list-src="${src}"
+   301→                    title="ویرایش اطلاعات این رول (ذخیرهٔ ماندگار — جایگزین اطلاعات فایل)"
+   302→                    aria-label="ویرایش رکورد ${U.escapeHtml(r.rollNumber || '')}">${UI.icons.edit}</button>
+   303→          </div>`,
+   304→      },
+   305→    };
+   306→
+   307→    for (const col of Object.values(registry)) {
+   308→      const w = Number(widths[col.key]);
+   309→      col.width = Number.isFinite(w) && w > 0 ? w : undefined;
+   310→    }
+   311→    return registry;
+   312→  };
+   313→
+   314→  /** اعمال مرتب‌سازی چندمرحله‌ای (عددی/متنی) */
+   315→  ListsView.applySort = function (rows, pipeline) {
+   316→    const sorted = [...rows];
+   317→    for (let i = pipeline.length - 1; i >= 0; i--) {
+   318→      const { field, direction } = pipeline[i];
+   319→      const spec = RM.config.LIST_SORTABLE_FIELDS[field] || { numeric: true };
+   320→      sorted.sort((a, b) => {
+   321→        let r;
+   322→        if (spec.numeric) {
+   323→          r = U.compareNumeric(a[field], b[field], 'asc');
+   324→        } else {
+   325→          const ka = String(a[field] ?? '');
+   326→          const kb = String(b[field] ?? '');
+   327→          r = ka.localeCompare(kb, 'fa', { numeric: true });
+   328→          if (r !== 0 && (ka === '' || kb === '')) r = ka === '' ? 1 : -1;
+   329→        }
+   330→        return direction === 'desc' ? -r : r;
+   331→      });
+   332→    }
+   333→    return sorted;
+   334→  };
+   335→
+   336→  /** رندر جدول لیست یک منبع */
+   337→  ListsView.renderTable = async function (src) {
+   338→    const st = ListsView.state[src];
+   339→    const target = RM.config.IMPORT_TARGETS[src];
+   340→    const wrap = document.getElementById(`list-table-${src}`);
+   341→    const statsEl = document.getElementById(`list-stats-${src}`);
+   342→    if (!wrap) return;
+   343→
+   344→    /* --- داده: رکوردهای فایل + اعمال ویرایش‌ها (جایگزینی اطلاعات فایل) --- */
+   345→    const records = await RM.edits.applyToRecords(src, await db[target.table].toArray());
+   346→    const editedCount = RM.edits._lastAppliedCount || 0;
+   347→
+   348→    const rows = ListsView.applySort(records, st.sortPipeline);
+   349→
+   350→    /* --- چیپ‌های آمار --- */
+   351→    statsEl.innerHTML = `
+   352→      <span class="chip">${U.faNum(rows.length)} رکورد</span>
+   353→      ${editedCount ? `<span class="chip chip-warn" title="رکوردهایی که اطلاعات ویرایش‌شده دارند">✎ ویرایش‌شده: ${U.faNum(editedCount)}</span>` : ''}`;
+   354→
+   355→    /* --- پنل مرتب‌سازی --- */
+   356→    UI.sortPanel(document.getElementById(`list-sort-pipeline-${src}`), st.sortPipeline,
+   357→      RM.config.LIST_SORTABLE_FIELDS, {
+   358→        onDir: (i) => {
+   359→          st.sortPipeline[i].direction = st.sortPipeline[i].direction === 'asc' ? 'desc' : 'asc';
+   360→          DB.setSetting(`list${cap(src)}Sort`, st.sortPipeline);
+   361→          ListsView.renderTable(src);
+   362→        },
+   363→        onRemove: (i) => {
+   364→          st.sortPipeline.splice(i, 1);
+   365→          DB.setSetting(`list${cap(src)}Sort`, st.sortPipeline);
+   366→          ListsView.renderTable(src);
+   367→        },
+   368→        onReorder: (from, to) => {
+   369→          const [moved] = st.sortPipeline.splice(from, 1);
+   370→          st.sortPipeline.splice(to, 0, moved);
+   371→          DB.setSetting(`list${cap(src)}Sort`, st.sortPipeline);
+   372→          ListsView.renderTable(src);
+   373→        },
+   374→        emptyText: 'مرتب‌سازی پیش‌فرض (شماره ستاپ، شماره رول)',
+   375→      });
+   376→
+   377→    /* --- پنل ترتیب ستون‌ها + نمایش/مخفی + عرض --- */
+   378→    const all = await ListsView.columnRegistry(src);
+   379→    const hiddenSet = new Set(st.hiddenCols || []);
+   380→    const items = (st.columnOrder || RM.config.LIST_DEFAULT_COLUMN_ORDER[src])
+   381→      .map((key) => all[key])
+   382→      .filter(Boolean)
+   383→      .map((c) => ({ key: c.key, label: c.label, width: (st.columnWidths || {})[c.key] ?? 0, hidden: hiddenSet.has(c.key) }));
+   384→
+   385→    UI.orderPanel(document.getElementById(`list-cols-pipeline-${src}`), items, {
+   386→      onMove: async (from, to) => {
+   387→        const order = st.columnOrder || [...RM.config.LIST_DEFAULT_COLUMN_ORDER[src]];
+   388→        const [moved] = order.splice(from, 1);
+   389→        order.splice(to, 0, moved);
+   390→        st.columnOrder = order;
+   391→        await DB.setSetting(`list${cap(src)}ColumnOrder`, order);
+   392→        ListsView.renderTable(src);
+   393→      },
+   394→      onWidth: async (key, w) => {
+   395→        st.columnWidths = st.columnWidths || {};
+   396→        st.columnWidths[key] = w;
+   397→        await DB.setSetting(`list${cap(src)}ColumnWidths`, st.columnWidths);
+   398→        ListsView.renderTable(src);
+   399→      },
+   400→      /* --- تغییر ۳: نمایش/مخفی‌کردن هر ستون --- */
+   401→      onToggle: async (key, hidden) => {
+   402→        const set = new Set(st.hiddenCols || []);
+   403→        if (hidden) set.add(key);
+   404→        else set.delete(key);
+   405→        st.hiddenCols = [...set];
+   406→        await DB.setSetting(`list${cap(src)}HiddenCols`, st.hiddenCols);
+   407→        ListsView.renderTable(src);
+   408→        UI.toast(hidden
+   409→          ? `ستون «${U.escapeHtml((all[key] || {}).label || key)}» در جدول مخفی شد — از پنل ترتیب ستون‌ها دوباره نمایش داده می‌شود.`
+   410→          : `ستون «${U.escapeHtml((all[key] || {}).label || key)}» دوباره نمایش داده شد.`, 'info');
+   411→      },
+   412→      emptyText: 'بدون ستون',
+   413→    });
+   414→
+   415→    /* --- جدول اصلی (فیلتر ستون‌ها + ارتفاع داینامیک) ---
+   416→       فیلترها روی «همهٔ» رکوردها اعمال می‌شوند؛ برای پاسخ‌گویی با دیتای
+   417→       بزرگ فقط LIST_MAX_DOM_ROWS ردیف اولِ فیلترشده در DOM رندر می‌شود. */
+   418→    const columns = (st.columnOrder || RM.config.LIST_DEFAULT_COLUMN_ORDER[src])
+   419→      .map((key) => all[key])
+   420→      .filter(Boolean)
+   421→      .filter((c) => !hiddenSet.has(c.key));
+   422→
+   423→    UI.filterTable(wrap, columns, rows, {
+   424→      state: st,
+   425→      visibleRows: RM.config.LIST_VISIBLE_ROWS,
+   426→      rowHeight: 40,
+   427→      tableClass: 'cut-table list-table',
+   428→      maxDomRows: RM.config.LIST_MAX_DOM_ROWS,
+   429→      emptyText: src === 'rolls'
+   430→        ? 'هنوز فایل «رول‌های موجود» Import نشده — از کادر بالا فایل را بارگذاری کنید.'
+   431→        : 'هنوز فایل «سابقه رول‌ها (آرشیو)» Import نشده — از کادر بالا فایل را بارگذاری کنید.',
+   432→      filteredEmptyText: 'هیچ رکوردی با فیلترهای فعلی مطابقت ندارد — فیلترها را پاک کنید.',
+   433→      footerNote: 'فیلتر هر ستون زیر سرستون همان ستون · منطق: شامل بودن · دکمهٔ «≠» = شامل نشود · سلول‌های «✎» ویرایش‌شده و جایگزین فایل هستند',
+   434→      onRowsChange: (n) => DB.setSetting(`list${cap(src)}VisibleRows`, n),
+   435→      onRendered: () => {
+   436→        wrap.querySelectorAll('[data-list-edit]').forEach((btn) => {
+   437→          btn.addEventListener('click', () =>
+   438→            ListsView.openEditModal(btn.dataset.listSrc, Number(btn.dataset.listEdit)));
+   439→        });
+   440→      },
+   441→    });
+   442→  };
+   443→
+   444→  /* ================================================================
+   445→     ۳) جدول رول‌های ویرایش‌شده (زبانهٔ سوم)
+   446→     ================================================================ */
+   447→
+   448→  ListsView.renderEdited = async function () {
+   449→    const wrap = document.getElementById('edited-rolls-table');
+   450→    const badge = document.getElementById('edited-count-badge');
+   451→    if (!wrap) return;
+   452→
+   453→    const edits = await RM.edits.getAll();
+   454→    if (badge) badge.textContent = U.faNum(edits.length);
+   455→
+   456→    if (!edits.length) {
+   457→      wrap.innerHTML = `
+   458→        <div class="empty-state">
+   459→          ${UI.icons.audit}
+   460→          <h4>رولی ویرایش نشده است</h4>
+   461→          <p>با دکمهٔ ✎ در جدول «لیست رول های موجود» یا «لیست سابقه رول ها» اطلاعات هر رول را ویرایش کنید — ویرایش‌ها ماندگارند، پس از هر Import جایگزین اطلاعات فایل می‌شوند و در Backup ذخیره می‌شوند.</p>
+   462→        </div>`;
+   463→      return;
+   464→    }
+   465→
+   466→    /* برچسب‌های فیلد برای نمایش نام فیلدهای ویرایش‌شده */
+   467→    const labelsOf = {};
+   468→    for (const src of ['rolls', 'archived']) {
+   469→      const labels = await N.effectiveColumnLabels(src);
+   470→      Object.assign(labelsOf, { [src]: labels });
+   471→    }
+   472→
+   473→    const rows = [...edits].sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+   474→
+   475→    const columns = [
+   476→      { key: 'source', label: 'منبع', render: (r) => U.escapeHtml(RM.config.DATASET_LABELS[r.source] || r.source) },
+   477→      {
+   478→        key: 'rollNumber', label: 'شماره رول (کلید ویرایش)', className: 'ltr em-cell',
+   479→        render: (r) => U.escapeHtml(r.rollNumber || '—'),
+   480→      },
+   481→      {
+   482→        key: 'fields', label: 'اطلاعات ویرایش‌شده',
+   483→        render: (r) => `<div class="edited-fields-list">${Object.entries(r.fields || {})
+   484→          .map(([f, v]) => {
+   485→            const label = (labelsOf[r.source] || {})[f] || RM.config.FIELD_LABELS[f] || f;
+   486→            return `<span class="edited-field-chip">${U.escapeHtml(String(label))}: <b>${U.escapeHtml(String(v ?? '—'))}</b></span>`;
+   487→          }).join('')}</div>`,
+   488→      },
+   489→      { key: 'updatedAt', label: 'آخرین ویرایش', render: (r) => U.faDate(r.updatedAt) },
+   490→      {
+   491→        key: 'actions', label: 'عملیات',
+   492→        render: (r) => `
+   493→          <div class="row-actions">
+   494→            <button type="button" class="btn btn-ghost btn-icon" data-edit-again="${U.escapeHtml(r.source)}" data-edit-key="${U.escapeHtml(r.rollNumber)}"
+   495→                    title="ویرایش مجدد این رول (ویرایش جدید روی قبلی ذخیره می‌شود)" aria-label="ویرایش مجدد">${UI.icons.edit}</button>
+   496→            <button type="button" class="btn btn-ghost btn-icon" data-edit-revert="${U.escapeHtml(r.source)}" data-edit-key="${U.escapeHtml(r.rollNumber)}"
+   497→                    title="حذف ویرایش — بازگشت کامل به اطلاعات فایل" aria-label="حذف ویرایش">${UI.icons.trash}</button>
+   498→          </div>`,
+   499→      },
+   500→    ];
+   501→
+   502→    const renderPage = (page) => {
+   503→      ListsView._editedPage = page;
+   504→      UI.renderTable(wrap, columns, rows, {
+   505→        page,
+   506→        pageSize: RM.config.PAGE_SIZE,
+   507→        emptyText: 'رولی ویرایش نشده است.',
+   508→        onPageChange: (next) => renderPage(next),
+   509→      });
+   510→
+   511→      wrap.querySelectorAll('[data-edit-again]').forEach((btn) => {
+   512→        btn.addEventListener('click', () => ListsView.editAgain(btn.dataset.editAgain, btn.dataset.editKey));
+   513→      });
+   514→      wrap.querySelectorAll('[data-edit-revert]').forEach((btn) => {
+   515→        btn.addEventListener('click', () => ListsView.revertEdit(btn.dataset.editRevert, btn.dataset.editKey));
+   516→      });
+   517→    };
+   518→    renderPage(ListsView._editedPage);
+   519→  };
+   520→
+   521→  /** ویرایش مجدد از زبانهٔ ویرایش‌شده‌ها — رکورد فعال همان رول را باز می‌کند */
+   522→  ListsView.editAgain = async function (src, rollNumber) {
+   523→    const target = RM.config.IMPORT_TARGETS[src];
+   524→    const record = await db[target.table].where('rollNumber').equals(String(rollNumber)).first();
+   525→    if (!record) {
+   526→      UI.toast('رکورد فعالی با این شماره رول در دیتای فایل نیست — ویرایش ذخیره شده و در Importهای بعدی اعمال می‌شود.', 'info', 6000);
+   527→      return;
+   528→    }
+   529→    ListsView.openEditModal(src, record.id);
+   530→  };
+   531→
+   532→  /** حذف ویرایش یک رول (بازگشت به اطلاعات فایل) */
+   533→  ListsView.revertEdit = async function (src, rollNumber) {
+   534→    const labels = RM.config.DATASET_LABELS[src] || src;
+   535→    const ok = await UI.confirm({
+   536→      title: 'حذف ویرایش رول',
+   537→      html: `<div class="confirm-stats"><div>منبع: <b>${U.escapeHtml(String(labels))}</b></div>
+   538→             <div>شماره رول: <b>${U.escapeHtml(String(rollNumber))}</b></div></div>`,
+   539→      message: 'ویرایش این رول حذف می‌شود و اطلاعات اصلی فایل دوباره معتبر می‌شود. ادامه می‌دهید؟',
+   540→      confirmText: 'بله، ویرایش را حذف کن',
+   541→      danger: true,
+   542→    });
+   543→    if (!ok) return;
+   544→
+   545→    await RM.edits.removeEdit(src, rollNumber);
+   546→    UI.toast('ویرایش حذف شد — اطلاعات فایل دوباره معتبر است.', 'success');
+   547→    await RM.refreshAll();
+   548→  };
+   549→
+   550→  /* ================================================================
+   551→     ۴) مودال ویرایش رکورد
+   552→     ================================================================ */
+   553→
+   554→  /** بازکردن مودال ویرایش یک رکورد */
+   555→  ListsView.openEditModal = async function (src, recordId) {
+   556→    const target = RM.config.IMPORT_TARGETS[src];
+   557→    const record = await db[target.table].get(recordId);
+   558→    if (!record) {
+   559→      UI.toast('رکورد یافت نشد.', 'warning');
+   560→      return;
+   561→    }
+   562→
+   563→    /* مقدار مؤثر (فایل + ویرایش‌های ذخیره‌شده) برای پیش‌فرض فرم */
+   564→    const effective = { ...record };
+   565→    await RM.edits.applyToRecords(src, [effective]);
+   566→    const editKey = effective._editKey ?? record.rollNumber;   // کلید ویرایش = شمارهٔ اصلی
+   567→
+   568→    const labels = await N.effectiveColumnLabels(src);
+   569→    const fields = ListsView.editableFields(src);
+   570→    const numeric = new Set(RM.config.LIST_NUMERIC_EDIT_FIELDS);
+   571→    const int = new Set(RM.config.LIST_INT_EDIT_FIELDS);
+   572→
+   573→    const inputId = (f) => `lef-${f}`;
+   574→
+   575→    const fieldHtml = fields.map((f) => {
+   576→      const isNum = numeric.has(f);
+   577→      const label = U.escapeHtml(labels[f] || RM.config.FIELD_LABELS[f] || f);
+   578→      const isEdited = !!(effective.__editedFields && effective.__editedFields.includes(f));
+   579→
+   580→      let value = effective[f];
+   581→      if (value === null || value === undefined) value = '';
+   582→      else if (value instanceof Date) value = String(value);
+   583→      else value = String(value);
+   584→
+   585→      return `
+   586→        <div class="field">
+   587→          <label for="${inputId(f)}">${label}
+   588→            ${isEdited ? '<span class="field-edit-flag" title="این فیلد ویرایش شده و مقدار فعلی جایگزین فایل است">ویرایش‌شده</span>' : ''}
+   589→            ${isNum ? '<span class="unit">(عددی)</span>' : ''}
+   590→          </label>
+   591→          <input type="text" id="${inputId(f)}" ${isNum ? 'inputmode="decimal"' : ''} dir="${f === 'rollNumber' || f === 'grade' || f === 'palletNumber' ? 'ltr' : 'auto'}"
+   592→                 autocomplete="off" value="${U.escapeHtml(value)}" data-lef="${f}"
+   593→                 aria-label="مقدار ${label}">
+   594→          <p class="field-error" id="lef-err-${f}" hidden></p>
+   595→        </div>`;
+   596→    }).join('');
+   597→
+   598→    document.getElementById('modal-edit-title').textContent =
+   599→      `ویرایش رکورد — ${RM.config.DATASET_LABELS[src]} · ${U.escapeHtml(record.rollNumber || 'بدون شماره')}`;
+   600→
+   601→    document.getElementById('modal-edit-body').innerHTML = `
+   602→      <div class="modal-edit-fields">${fieldHtml}</div>
+   603→      <p class="modal-edit-note">
+   604→        • مقادیر خالی = «بدون مقدار» (null) ذخیره می‌شود.<br>
+   605→        • ویرایش ذخیره می‌شود و از این پس <b>جایگزین اطلاعات فایل ایمپورت‌شده</b> می‌شود (پس از هر Import هم دوباره اعمال می‌گردد).<br>
+   606→        • هر ویرایش جدید روی ویرایش قبلی همان رول ذخیره می‌شود؛ اگر مقداری را به مقدار اصلی فایل برگردانید، ویرایش همان فیلد حذف می‌شود.
+   607→      </p>`;
+   608→
+   609→    document.getElementById('modal-edit').hidden = false;
+   610→
+   611→    ListsView.editing = {
+   612→      sourceKey: src,
+   613→      recordId,
+   614→      imported: record,        // رکورد اصلی فایل (مبنای تشخیص بازگشت به اصلی)
+   615→      effective,
+   616→      editKey,                 // شماره رول اصلی — کلید رکورد ویرایش
+   617→    };
+   618→
+   619→    const first = document.querySelector('#modal-edit-body input');
+   620→    if (first) first.focus();
+   621→  };
+   622→
+   623→  /** بستن مودال ویرایش */
+   624→  ListsView.closeEditModal = function () {
+   625→    document.getElementById('modal-edit').hidden = true;
+   626→    ListsView.editing = null;
+   627→  };
+   628→
+   629→  /** ذخیرهٔ ویرایش (دکمهٔ «ذخیرهٔ تغییرات») */
+   630→  ListsView.saveEditModal = async function () {
+   631→    const ctx = ListsView.editing;
+   632→    if (!ctx) return;
+   633→
+   634→    const numeric = new Set(RM.config.LIST_NUMERIC_EDIT_FIELDS);
+   635→    const int = new Set(RM.config.LIST_INT_EDIT_FIELDS);
+   636→    const fields = ListsView.editableFields(ctx.sourceKey);
+   637→
+   638→    const changes = {};
+   639→    let hasInvalid = false;
+   640→
+   641→    for (const f of fields) {
+   642→      const input = document.querySelector(`[data-lef="${f}"]`);
+   643→      if (!input) continue;
+   644→      const raw = input.value.trim();
+   645→
+   646→      if (raw === '') {
+   647→        changes[f] = (f === 'rollNumber') ? '' : null;
+   648→        continue;
+   649→      }
+   650→
+   651→      if (numeric.has(f)) {
+   652→        const v = U.parseNumber(raw);
+   653→        if (v === null) {
+   654→          UI.setFieldError(input, document.getElementById(`lef-err-${f}`), 'عدد معتبر وارد کنید.');
+   655→          hasInvalid = true;
+   656→          continue;
+   657→        }
+   658→        changes[f] = int.has(f) ? Math.trunc(v) : v;
+   659→      } else {
+   660→        changes[f] = raw;
+   661→      }
+   662→    }
+   663→
+   664→    if (hasInvalid) {
+   665→      UI.toast('برخی فیلدها عدد معتبر نیستند — خطاها را برطرف کنید.', 'error');
+   666→      return;
+   667→    }
+   668→
+   669→    /* شماره رول خالی؟ (کلید ویرایش) */
+   670→    if ('rollNumber' in changes && (changes.rollNumber === '' || changes.rollNumber === null)) {
+   671→      const input = document.querySelector('[data-lef="rollNumber"]');
+   672→      UI.setFieldError(input, document.getElementById('lef-err-rollNumber'), 'شماره رول نمی‌تواند خالی باشد.');
+   673→      UI.toast('شماره رول نمی‌تواند خالی باشد.', 'error');
+   674→      return;
+   675→    }
+   676→
+   677→    const result = await RM.edits.saveEdit(ctx.sourceKey, ctx.editKey, changes, ctx.imported);
+   678→
+   679→    ListsView.closeEditModal();
+   680→
+   681→    const changed = result.applied.length + result.removed.length;
+   682→    if (!changed && Object.keys(result.fields).length === 0) {
+   683→      UI.toast('تغییری ثبت نشد — همهٔ مقادیر با اطلاعات فایل یکسان است.', 'info');
+   684→    } else {
+   685→      UI.toast(
+   686→        `ویرایش رول «${U.escapeHtml(String(ctx.editKey))}» ذخیره شد — ${U.faNum(Object.keys(result.fields).length)} فیلد ویرایش‌شده. از این پس جایگزین اطلاعات فایل است.`,
+   687→        'success',
+   688→        6000
+   689→      );
+   690→    }
+   691→
+   692→    await RM.refreshAll();
+   693→  };
+   694→
+   695→  /* ================================================================
+   696→     ۵) رندر کامل
+   697→     ================================================================ */
+   698→
+   699→  ListsView.render = async function () {
+   700→    await ListsView.renderTable('rolls');
+   701→    await ListsView.renderTable('archived');
+   702→    await ListsView.renderEdited();
+   703→  };
+   704→
+   705→  RM.views = RM.views || {};
+   706→  RM.views.lists = ListsView;
+   707→})();
+   708→

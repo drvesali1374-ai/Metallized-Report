@@ -1,0 +1,766 @@
+     1→/* =========================================================================
+     2→   calc.js — موتور محاسبهٔ مرکزی (Calculation Engine) ⭐
+     3→   -------------------------------------------------------------------------
+     4→   این تنها منبع محاسباتی کل سیستم است (Single Source of Truth — §53، §79،
+     5→   §105). هیچ نما (Dashboard، Setup، Raw Rolls) منطق محاسبهٔ خودش را ندارد.
+     6→
+     7→   خط لولهٔ محاسبه (§54):
+     8→     Raw Excel (نرمال‌شده)
+     9→        ↓  قوانین متراژ استاندارد → استانداردسازی طول
+    10→     گروه‌بندی رول‌های خام (کلید ۳فاکتوری §40)
+    11→        ↓
+    12→     متالایز یونیک از آرشیو (§7)
+    13→        ↓
+    14→     تطبیق با ستاپ‌ها + تخصیص ظرفیت‌محور (§42-§44)
+    15→        ↓
+    16→     گزارش ستاپ + هشدارها + خلاصهٔ داشبورد
+    17→   -------------------------------------------------------------------------
+    18→   خروجی calculateProductionState():
+    19→     {
+    20→       rawRollGroups,      گروه‌های رول خام (§33)
+    21→       metallizedGroups,   گروه‌های متالایز (کلید ۲فاکتوری §41)
+    22→       setupReport,        گزارش هر ستاپ (§46-§50)
+    23→       warnings,           هشدارهای مرکزی کیفیت داده (§52)
+    24→       summary             خلاصهٔ KPI داشبورد (§57-§59)
+    25→     }
+    26→   ========================================================================= */
+    27→
+    28→'use strict';
+    29→
+    30→(function () {
+    31→  const U = RM.utils;
+    32→  const N = RM.normalize;
+    33→  const R = RM.rulesEngine;
+    34→  const DB = RM.db;
+    35→
+    36→  const Calc = { _cached: null, _dirty: true };
+    37→
+    38→  /* ================================================================
+    39→     ۱) استانداردسازی + گروه‌بندی رول‌های خام (§33، §40)
+    40→     ================================================================ */
+    41→
+    42→  /**
+    43→   * گروه‌بندی رول‌های خام فعلی بر اساس کلید ۳فاکتوری:
+    44→   *     عرض + متراژ استاندارد + شماره ستاپ
+    45→   * رول‌هایی که قانون متراژی ندارند با standardLength=null گروه می‌شوند
+    46→   * و در تطبیق ستاپ شرکت نمی‌کنند (§17) اما دیده می‌شوند (شفافیت).
+    47→   */
+    48→  function buildRawRollGroups(rawRolls, rules) {
+    49→    const groups = new Map();   // key → group object
+    50→    const noRuleCount = { count: 0 };   // رول‌های بدون قانون متراژ
+    51→
+    52→    for (const roll of rawRolls) {
+    53→      // متراژ استاندارد از قوانین (§19)
+    54→      const standardLength = R.resolveStandardLength(rules, roll.thickness, roll.actualLength);
+    55→      if (standardLength === null) noRuleCount.count++;
+    56→
+    57→      const key = U.formatKey(roll.width, standardLength, roll.setupNumber);
+    58→      let group = groups.get(key);
+    59→
+    60→      if (!group) {
+    61→        group = {
+    62→          key,
+    63→          width: roll.width,
+    64→          standardLength,
+    65→          setupNumber: roll.setupNumber,
+    66→          thickness: roll.thickness,
+    67→          count: 0,
+    68→          rollNumbers: [],        // برای Audit و پیش‌نمایش
+    69→          rollIds: [],            // شناسه‌های رکوردها — برای جزئیات گروه (§7 اصلاحات)
+    70→          hasRule: standardLength !== null,
+    71→          matched: false,         // پس از ساخت نمایهٔ ستاپ‌ها تکمیل می‌شود
+    72→        };
+    73→        groups.set(key, group);
+    74→      }
+    75→
+    76→      group.count++;
+    77→      if (group.rollNumbers.length < 500) group.rollNumbers.push(roll.rollNumber);
+    78→      group.rollIds.push(roll.id);
+    79→    }
+    80→
+    81→    return { groups: [...groups.values()], noRuleCount: noRuleCount.count };
+    82→  }
+    83→
+    84→  /* ================================================================
+    85→     ۲) متالایز یونیک از آرشیو (§7، §41، §48)
+    86→     ================================================================ */
+    87→
+    88→  /**
+    89→   * استخراج رول‌های خام متالایز شده:
+    90→     - فقط رکوردهای دارای R/r
+    91→     - یونیک بر اساس شماره رول (هر رول فقط یک‌بار — §7)
+    92→     - گروه‌بندی با کلید ۲فاکتوری: عرض + شماره ستاپ (§41)
+    93→   * توجه: از شماره رول برای استخراج بخش قبل از M استفاده نمی‌شود (§7).
+    94→   */
+    95→  function buildMetallizedGroups(archivedRolls) {
+    96→    const uniqueByRollNumber = new Map();   // rollNumber → رکورد یونیک
+    97→
+    98→    for (const roll of archivedRolls) {
+    99→      if (!N.hasR(roll.filmType)) continue;
+   100→      const rn = String(roll.rollNumber ?? '').trim();
+   101→      if (rn === '') continue;
+   102→      if (!uniqueByRollNumber.has(rn)) {
+   103→        uniqueByRollNumber.set(rn, roll);   // اولین رخورد کافی است (یونیک‌سازی)
+   104→      }
+   105→    }
+   106→
+   107→    // گروه‌بندی ۲فاکتوری
+   108→    const groups = new Map();
+   109→    for (const roll of uniqueByRollNumber.values()) {
+   110→      const key = U.formatKey(roll.width, roll.setupNumber);
+   111→      let group = groups.get(key);
+   112→      if (!group) {
+   113→        group = { key, width: roll.width, setupNumber: roll.setupNumber, count: 0, rollNumbers: [] };
+   114→        groups.set(key, group);
+   115→      }
+   116→      group.count++;
+   117→      if (group.rollNumbers.length < 500) group.rollNumbers.push(roll.rollNumber);
+   118→    }
+   119→
+   120→    return {
+   121→      uniqueCount: uniqueByRollNumber.size,
+   122→      uniqueRecords: [...uniqueByRollNumber.values()],   // برای Drill-down مازاد متالایز
+   123→      groups: [...groups.values()],
+   124→    };
+   125→  }
+   126→
+   127→  /* ================================================================
+   128→     ۳) موتور تخصیص ظرفیت‌محور (§42-§44)
+   129→     ================================================================ */
+   130→
+   131→  /**
+   132→   * تخصیص رول‌های موجود (خام یا متالایز) به ستاپ‌های دارای کلید مشترک.
+   133→   *
+   134→   * الگوریتم (§43):
+   135→   *   ۱) ستاپ‌های دارای کلید را بر اساس rollCount صعودی مرتب کن
+   136→   *   ۲) به‌ترتیب، هر ستاپ تا سقف ظرفیت خودش رول بگیرد (Greedy ASC)
+   137→   *   ۳) هر رول فقط به یک ستاپ تخصیص می‌یابد (بدون شمارش مضاعف — §88)
+   138→   *   ۴) مازاد → Unallocated و در هشدارها گزارش می‌شود (§44)
+   139→   *
+   140→   * اگر مجموع ظرفیت < تعداد رول‌ها → مازاد تخصیص‌نیافته برمی‌گردد.
+   141→   *
+   142→   * @param {number} available        تعداد رول در دسترس برای این کلید
+   143→   * @param {Array}  candidateSetups  ستاپ‌های دارای کلید مشترک
+   144→   * @returns {Map} setupId → allocated، به‌همراه unallocated
+   145→   */
+   146→  function allocateByKey(available, candidateSetups) {
+   147→    // مرتب‌سازی صعودی بر اساس ظرفیت (§43) — پایدار برای تساوی‌ها
+   148→    const sorted = [...candidateSetups].sort((a, b) =>
+   149→      a.rollCount - b.rollCount || a.id - b.id
+   150→    );
+   151→
+   152→    let remaining = available;
+   153→    const allocation = new Map();   // setupId → { allocated, capacity }
+   154→
+   155→    for (const setup of sorted) {
+   156→      const capacity = setup.rollCount;
+   157→      // ظرفیت منفی امکان‌پذیر نیست (اعتبارسنجی ورود) اما محافظ works
+   158→      const granted = Math.max(0, Math.min(capacity, remaining));
+   159→      allocation.set(setup.id, { allocated: granted, capacity });
+   160→      remaining -= granted;
+   161→      if (remaining <= 0) break;
+   162→    }
+   163→
+   164→    // ستاپ‌هایی که به دلیل break حلقه تخصیص نگرفتند
+   165→    for (const setup of sorted) {
+   166→      if (!allocation.has(setup.id)) {
+   167→        allocation.set(setup.id, { allocated: 0, capacity: setup.rollCount });
+   168→      }
+   169→    }
+   170→
+   171→    return { allocation, unallocated: Math.max(0, remaining) };
+   172→  }
+   173→
+   174→  /* ================================================================
+   175→     ۴-ب) گزارش رول‌های برش‌خورده (فرزند) — کلید: عرض برش + شماره ستاپ
+   176→     ================================================================ */
+   177→
+   178→  /**
+   179→   * ساخت گزارش رول‌های برش‌خورده از دو منبع:
+   180→   *
+   181→   *  ۱) «رول‌های موجود» — رکوردهایی که شناسهٔ رولشان مشخصهٔ بازو (L/R)
+   182→   *     بعد از M دارد (N.isCutRoll)؛ کلید هر رکورد: cutWidth + setupNumber.
+   183→   *     شمارش‌ها: موجود، گریدهای X/U/Q/T، پای کار (موقعیت فعلی)، پالت شده.
+   184→   *
+   185→   *  ۲) «گزارش تولید ستاپ‌ها» — تنوع عرض‌های الگوی برش هر ستاپ، مبنای
+   186→   *     رکوردهای جدول است:
+   187→   *       مقدار در ستاپ   = Σ (تعداد تکرار عرض در الگو × ستون «تعداد»)
+   188→   *       مقدار برش‌نخورده = Σ (تعداد تکرار عرض در الگو × ستون «برش‌نشده»)
+   189→   *     روی همهٔ رکوردهای گزارش با همان شماره ستاپ.
+   190→   *
+   191→   *  وزن هر مقدار = عرض × ۰٫۳۶۲ × تعداد (ضریب ثابت — config.CUT_WEIGHT_PER_MM).
+   192→   */
+   193→  function buildCutRollsReport(rolls, setupReport) {
+   194→    const GRADES = RM.config.GRADE_LETTERS;
+   195→    const W_PER_MM = RM.config.CUT_WEIGHT_PER_MM;
+   196→
+   197→    /* --- ۱) نمایهٔ رول‌های برش‌خوردهٔ موجود (بر کلید عرض + ستاپ) --- */
+   198→    const cutIndex = new Map();   // key → bucket
+   199→    let cutTotal = 0;
+   200→    let cutUnmatchable = 0;       // برش‌خورده بدون عرض/ستاپ — در هیچ رکوردی نمی‌نشیند
+   201→
+   202→    for (const roll of rolls) {
+   203→      if (!N.isCutRoll(roll)) continue;
+   204→      cutTotal++;
+   205→      if (roll.cutWidth === null || roll.setupNumber === null) {
+   206→        cutUnmatchable++;
+   207→        continue;
+   208→      }
+   209→      const key = U.formatKey(roll.cutWidth, roll.setupNumber);
+   210→      let bucket = cutIndex.get(key);
+   211→      if (!bucket) {
+   212→        bucket = {
+   213→          count: 0,
+   214→          grades: { X: 0, U: 0, Q: 0, T: 0 },
+   215→          endCount: 0,
+   216→          palletCount: 0,
+   217→          rollIds: [],
+   218→        };
+   219→        cutIndex.set(key, bucket);
+   220→      }
+   221→      bucket.count++;
+   222→      const g = N.gradeLetter(roll);
+   223→      if (g) bucket.grades[g]++;
+   224→      if (N.isEndOfLine(roll)) bucket.endCount++;
+   225→      if (!N.isEmptyPallet(roll.palletNumber)) bucket.palletCount++;
+   226→      if (bucket.rollIds.length < 2000) bucket.rollIds.push(roll.id);
+   227→    }
+   228→
+   229→    /* --- ۲) رکوردهای جدول از تنوع عرض‌های الگوی برش ستاپ‌ها --- */
+   230→    const recordsMap = new Map();   // key → record
+   231→
+   232→    for (const sr of setupReport) {
+   233→      if (sr.setupNumber === null) continue;
+   234→      const parsed = RM.setupEngine.parsePattern(sr.cuttingPattern);
+   235→      if (!parsed.ok || !parsed.parts.length) continue;
+   236→
+   237→      for (const part of parsed.parts) {
+   238→        const key = U.formatKey(part, sr.setupNumber);
+   239→        if (!recordsMap.has(key)) {
+   240→          recordsMap.set(key, {
+   241→            key,
+   242→            width: part,
+   243→            setupNumber: sr.setupNumber,
+   244→            existingCount: 0,
+   245→            inSetupCount: 0,
+   246→            uncutCount: 0,
+   247→            grades: { X: 0, U: 0, Q: 0, T: 0 },
+   248→            endCount: 0,
+   249→            palletCount: 0,
+   250→            matchedRollIds: [],
+   251→          });
+   252→        }
+   253→      }
+   254→    }
+   255→
+   256→    /* --- ۳) محاسبهٔ «در ستاپ» و «برش‌نخورده» از رکوردهای گزارش ---
+   257→       برای هر کلید، روی همهٔ رکوردهای گزارش با همان شماره ستاپ:
+   258→       تعداد تکرار عرض در الگو × (تعداد | برش‌نشده) — جمع کل. */
+   259→    const setupsByNumber = new Map();   // setupNumber → [report rows]
+   260→    for (const sr of setupReport) {
+   261→      if (sr.setupNumber === null) continue;
+   262→      if (!setupsByNumber.has(sr.setupNumber)) setupsByNumber.set(sr.setupNumber, []);
+   263→      setupsByNumber.get(sr.setupNumber).push(sr);
+   264→    }
+   265→
+   266→    for (const record of recordsMap.values()) {
+   267→      const rows = setupsByNumber.get(record.setupNumber) || [];
+   268→      for (const sr of rows) {
+   269→        const parsed = RM.setupEngine.parsePattern(sr.cuttingPattern);
+   270→        if (!parsed.ok || !parsed.parts.length) continue;
+   271→        let occurrences = 0;
+   272→        for (const part of parsed.parts) {
+   273→          if (part === record.width) occurrences++;
+   274→        }
+   275→        if (occurrences === 0) continue;
+   276→        record.inSetupCount += occurrences * (sr.rollCount || 0);
+   277→        record.uncutCount += occurrences * (sr.uncut || 0);
+   278→      }
+   279→
+   280→      /* --- ۴) پیوند با رول‌های موجود هم‌کلید (موجود/گرید/پای کار/پالت) --- */
+   281→      const bucket = cutIndex.get(record.key);
+   282→      if (bucket) {
+   283→        record.existingCount = bucket.count;
+   284→        record.grades = { ...bucket.grades };
+   285→        record.endCount = bucket.endCount;
+   286→        record.palletCount = bucket.palletCount;
+   287→        record.matchedRollIds = [...bucket.rollIds];
+   288→      }
+   289→    }
+   290→
+   291→    /* --- ۵) رکوردهای برش‌خوردهٔ موجودِ خارج از ستاپ‌ها (حالت شفافیت) ---
+   292→       اگر رول برش‌خورده‌ای در فایل موجود با کلیدی باشد که هیچ الگویی نمی‌سازد،
+   293→       در آمار گزارش می‌ماند اما رکورد مستقل نمی‌سازد (تعریف رکورد = از ستاپ). */
+   294→    const records = [...recordsMap.values()];
+   295→
+   296→    /* --- ۶) آمار کلی --- */
+   297→    const stats = {
+   298→      totalRecords: records.length,
+   299→      cutRollsFound: cutTotal,
+   300→      cutUnmatchable,
+   301→      totalExisting: records.reduce((s, r) => s + r.existingCount, 0),
+   302→      totalInSetup: records.reduce((s, r) => s + r.inSetupCount, 0),
+   303→      totalUncut: records.reduce((s, r) => s + r.uncutCount, 0),
+   304→    };
+   305→
+   306→    // وزن دقیق هر رکورد (عرض × ۰٫۳۶۲ × تعداد) — مقدار عددی کامل
+   307→    const weightOf = (width, count) => width * W_PER_MM * count;
+   308→    for (const r of records) {
+   309→      // فیلدهای مسطح گریدها (برای مرتب‌سازی/فیلتر/نمای جدول)
+   310→      r.xCount = r.grades.X;
+   311→      r.uCount = r.grades.U;
+   312→      r.qCount = r.grades.Q;
+   313→      r.tCount = r.grades.T;
+   314→
+   315→      r.existingWeight = weightOf(r.width, r.existingCount);
+   316→      r.inSetupWeight = weightOf(r.width, r.inSetupCount);
+   317→      r.uncutWeight = weightOf(r.width, r.uncutCount);
+   318→      r.gradeWeights = {
+   319→        X: weightOf(r.width, r.grades.X),
+   320→        U: weightOf(r.width, r.grades.U),
+   321→        Q: weightOf(r.width, r.grades.Q),
+   322→        T: weightOf(r.width, r.grades.T),
+   323→      };
+   324→      r.endWeight = weightOf(r.width, r.endCount);
+   325→      r.palletWeight = weightOf(r.width, r.palletCount);
+   326→    }
+   327→
+   328→    return { records, stats, gradeLetters: GRADES };
+   329→  }
+   330→
+   331→  /* ================================================================
+   332→     ۵) موتور محاسبهٔ اصلی — calculateProductionState (§53)
+   333→     ================================================================ */
+   334→
+   335→  /**
+   336→   * محاسبهٔ وضعیت کامل تولید از تمام منابع داده.
+   337→   * این تابع تنها منبع حقیقت کل رابط کاربری است.
+   338→   */
+   339→  async function calculateProductionState() {
+   340→    const { rolls, archivedRolls, setupRolls, rules, importMetadata } = await DB.loadAllSources();
+   341→
+   342→    /* --- قوانین زمان متالایز (تنظیمات — تغییرات جدید) --- */
+   343→    const timeRules = await DB.getSetting('machineTimeRules', []);
+   344→
+   345→    /* --- ۱) رول‌های خام فعلی (§6: R/r + پالت خالی) --- */
+   346→    const rawRolls = rolls.filter(N.isRawRoll);
+   347→
+   348→    /* --- ۲) گروه‌بندی خام (§33) --- */
+   349→    const { groups: rawRollGroups, noRuleCount } = buildRawRollGroups(rawRolls, rules);
+   350→
+   351→    /* --- ۳) متالایز یونیک (§7) --- */
+   352→    const metallized = buildMetallizedGroups(archivedRolls);
+   353→
+   354→    /* --- ۴) نمایه‌سازی گروه‌های خام برای تطبیق سریع (§56: Map) --- */
+   355→    const rawGroupIndex = new Map();
+   356→    for (const group of rawRollGroups) {
+   357→      if (group.hasRule) rawGroupIndex.set(group.key, group);
+   358→    }
+   359→
+   360→    /* --- ۵) نمایهٔ ستاپ‌ها ---
+   361→       rawIndex:  کلید ۳فاکتوری → ستاپ‌های دارای آن کلید
+   362→       metIndex:  کلید ۲فاکتوری → ستاپ‌های دارای آن کلید           */
+   363→    const rawIndex = new Map();
+   364→    const metIndex = new Map();
+   365→
+   366→    for (const setup of setupRolls) {
+   367→      // ستاپ ناقص (قدیمی/ناتمام) در تطبیق شرکت نمی‌کند (§25 کلید نیازمند داده کامل)
+   368→      const isComplete = setup.thickness !== null && setup.standardLength !== null;
+   369→      if (isComplete) {
+   370→        const rawKey = U.formatKey(setup.width, setup.standardLength, setup.setupNumber);
+   371→        if (!rawIndex.has(rawKey)) rawIndex.set(rawKey, []);
+   372→        rawIndex.get(rawKey).push(setup);
+   373→
+   374→        const metKey = U.formatKey(setup.width, setup.setupNumber);
+   375→        if (!metIndex.has(metKey)) metIndex.set(metKey, []);
+   376→        metIndex.get(metKey).push(setup);
+   377→      }
+   378→    }
+   379→
+   380→    // تکمیل پرچم «matched» گروه‌ها (وضعیت تطبیق — برای جدول و مرتب‌سازی وضعیت)
+   381→    for (const group of rawRollGroups) {
+   382→      group.matched = group.hasRule && rawIndex.has(group.key);
+   383→    }
+   384→
+   385→    /* --- ۶) تخصیص رول‌های خام موجود به ستاپ‌ها (ظرفیت‌محور) ---
+   386→       هر گروه خام بین ماشین‌های دارای همان کلید ۳فاکتوری بر اساس ظرفیت
+   387→       توزیع می‌شود تا هیچ رولی دو ستاپ را تغذیه نکند (§88 — بدون شمارش مضاعف). */
+   388→    const rawAllocationBySetup = new Map();   // setupId → { allocated, capacity, audit }
+   389→    const rawUnallocatedTotal = { total: 0, keys: [] };
+   390→
+   391→    for (const [key, group] of rawGroupIndex) {
+   392→      const candidates = rawIndex.get(key) || [];
+   393→      if (!candidates.length) continue;   // بدون ستاپ — در وضعیت گروه گزارش می‌شود
+   394→
+   395→      const { allocation, unallocated } = allocateByKey(group.count, candidates);
+   396→      if (unallocated > 0) {
+   397→        rawUnallocatedTotal.total += unallocated;
+   398→        rawUnallocatedTotal.keys.push({ key, unallocated });
+   399→      }
+   400→
+   401→      for (const [setupId, info] of allocation) {
+   402→        rawAllocationBySetup.set(setupId, {
+   403→          ...info,
+   404→          sourceKey: key,
+   405→          groupCount: group.count,
+   406→        });
+   407→      }
+   408→    }
+   409→
+   410→    /* --- ۷) تخصیص متالایز به ستاپ‌ها (§42-§44 — کلید ۲فاکتوری) --- */
+   411→    const metAllocationBySetup = new Map();
+   412→    const metUnallocatedTotal = { total: 0, keys: [] };
+   413→
+   414→    for (const [key, group] of metIndex) {
+   415→      const metGroup = metallized.groups.find((g) => g.key === key);
+   416→      const available = metGroup ? metGroup.count : 0;
+   417→      if (!available) continue;
+   418→
+   419→      const { allocation, unallocated } = allocateByKey(available, group);
+   420→      if (unallocated > 0) {
+   421→        metUnallocatedTotal.total += unallocated;
+   422→        metUnallocatedTotal.keys.push({ key, unallocated, available });
+   423→      }
+   424→
+   425→      for (const [setupId, info] of allocation) {
+   426→        metAllocationBySetup.set(setupId, {
+   427→          ...info,
+   428→          sourceKey: key,
+   429→          groupCount: available,
+   430→        });
+   431→      }
+   432→    }
+   433→
+   434→    /* --- ۸) گزارش هر ستاپ (§46-§50) + ستون‌های مانده زمان (تغییرات جدید) --- */
+   435→    const setupReport = setupRolls.map((setup) => {
+   436→      const rawAlloc = rawAllocationBySetup.get(setup.id);
+   437→      const metAlloc = metAllocationBySetup.get(setup.id);
+   438→
+   439→      const rawExisting = rawAlloc ? rawAlloc.allocated : 0;
+   440→      const metallizedAllocated = metAlloc ? metAlloc.allocated : 0;
+   441→
+   442→      // فرمول اصلی (§50): Uncut = SetupCount - (RawExisting + Metallized)
+   443→      const uncutCalculated = setup.rollCount - (rawExisting + metallizedAllocated);
+   444→
+   445→      /* --- استخراج مدت زمان از قوانین زمان (دستگاه + متراژ استاندارد) ---
+   446→         مانده زمان ستاپ = مدت زمان × تعداد
+   447→         مانده زمان موجودی = مدت زمان × (تعداد − متالایز)   ← نسخهٔ ۲٫۵
+   448→         (پایهٔ منفی — بیش از سفارش متالایزشده — به صفر محدود می‌شود)
+   449→         بدون قانون مطابق → هر دو مقدار null (نمایش «—») */
+   450→      const timeRule = R.findTimeRule(timeRules, setup.machineNumber, setup.standardLength);
+   451→      const durationMin = timeRule ? timeRule.durationMin : null;
+   452→      const remainingSetupTime = durationMin !== null ? durationMin * setup.rollCount : null;
+   453→      // نسخهٔ ۲٫۵: (تعداد − متالایز) × مدت — از جدول «تعریف قانون زمان متالایز (هر دستگاه)»
+   454→      const inventoryBase = Math.max(0, setup.rollCount - metallizedAllocated);
+   455→      const remainingProducedTime = durationMin !== null ? durationMin * inventoryBase : null;
+   456→
+   457→      return {
+   458→        ...setup,
+   459→        rawExisting,
+   460→        metallized: metallizedAllocated,
+   461→        uncutCalculated,                                  // مقدار خام (می‌تواند منفی باشد)
+   462→        uncut: Math.max(0, uncutCalculated),              // مقدار نمایش (§51، §86)
+   463→        conflict: uncutCalculated < 0 ? -uncutCalculated : 0,   // مغایرت ظرفیت (§86)
+   464→        timeRuleId: timeRule ? timeRule.id : null,
+   465→        durationMin,
+   466→        remainingSetupTime,
+   467→        remainingProducedTime,
+   468→        remainingInventoryCount: inventoryBase,   // پایهٔ زمان موجودی = تعداد − متالایز (نسخهٔ ۲٫۵)
+   469→        audit: {
+   470→          rawGroup: rawAlloc ? { key: rawAlloc.sourceKey, count: rawAlloc.groupCount } : null,
+   471→          metGroup: metAlloc ? { key: metAlloc.sourceKey, count: metAlloc.groupCount } : null,
+   472→          rawCapacity: rawAlloc ? rawAlloc.capacity : 0,
+   473→          metCapacity: metAlloc ? metAlloc.capacity : 0,
+   474→        },
+   475→      };
+   476→    });
+   477→
+   478→    /* --- ۸-ب) گزارش رول‌های برش‌خورده (فرزند) — تغییرات جدید --- */
+   479→    const cutRolls = buildCutRollsReport(rolls, setupReport);
+   480→
+   481→    /* --- ۹) هشدارهای مرکزی کیفیت داده (§52 + Drill-down) ---
+   482→       هر هشدار می‌تواند drill داشته باشد: { source, issue?, filter? }
+   483→       تا دقیقاً رکوردهای عامل همان هشدار در یک جدول با ستون‌های Mapping
+   484→       نمایش داده شوند (Summary → مشکل → رکوردهای عامل). */
+   485→    const warnings = [];
+   486→
+   487→    /* --- ۹-ب) رکوردهای ستاپ بدون قانون زمان (تغییرات جدید) --- */
+   488→    if (setupRolls.length && timeRules.length) {
+   489→      const noTimeRule = setupReport.filter((r) => r.remainingSetupTime === null);
+   490→      if (noTimeRule.length) {
+   491→        warnings.push({
+   492→          type: 'no-time-rule',
+   493→          severity: 'warning',
+   494→          title: `${U.faNum(noTimeRule.length)} رکورد ستاپ قانون زمان متالایز ندارد`,
+   495→          detail: 'برای ترکیب دستگاه + متراژ استاندارد این رکوردها قانونی در تنظیمات تعریف نشده؛ ستون‌های «مانده زمان» برایشان محاسبه نمی‌شود.',
+   496→          action: 'settings',
+   497→          drill: { source: 'setups', filter: 'no-time-rule' },
+   498→        });
+   499→      }
+   500→    } else if (setupRolls.length && !timeRules.length) {
+   501→      warnings.push({
+   502→        type: 'no-time-rules-at-all',
+   503→        severity: 'warning',
+   504→        title: 'هیچ قانون زمان متالایزی تعریف نشده است',
+   505→        detail: 'برای محاسبهٔ «مانده زمان ستاپ/موجودی» در گزارش ستاپ‌ها و داشبورد، برای هر دستگاه قانون زمان تعریف کنید.',
+   506→        action: 'settings',
+   507→      });
+   508→    }
+   509→
+   510→    // الف) بدون قانون متراژ تعریف‌شده
+   511→    if (!rules.length) {
+   512→      warnings.push({
+   513→        type: 'no-rules',
+   514→        severity: 'error',
+   515→        title: 'هیچ قانون متراژ استانداردی تعریف نشده است',
+   516→        detail: 'بدون تعریف قوانین در تنظیمات، هیچ رولی استانداردسازی و با ستاپ‌ها تطبیق نمی‌شود.',
+   517→        action: 'settings',
+   518→      });
+   519→    }
+   520→
+   521→    // ب) رول‌های خام بدون قانون پوشش‌دهنده (§17)
+   522→    if (noRuleCount > 0 && rules.length) {
+   523→      warnings.push({
+   524→        type: 'no-rule-coverage',
+   525→        severity: 'warning',
+   526→        title: `${U.faNum(noRuleCount)} رول خام قانون متراژی ندارد`,
+   527→        detail: 'متراژ واقعی این رول‌ها در بازهٔ هیچ قانونی برای ضخامتشان قرار نمی‌گیرد؛ با ستاپ‌ها تطبیق نمی‌شوند.',
+   528→        action: 'settings',
+   529→        drill: { source: 'rolls', filter: 'no-rule' },
+   530→      });
+   531→    }
+   532→
+   533→    // ج) گروه‌های خام بدون ستاپ (§52)
+   534→    const unmatchedGroups = rawRollGroups.filter((g) => g.hasRule && !g.matched);
+   535→    if (unmatchedGroups.length) {
+   536→      warnings.push({
+   537→        type: 'no-setup',
+   538→        severity: 'warning',
+   539→        title: `${U.faNum(unmatchedGroups.length)} گروه رول خام بدون ستاپ`,
+   540→        detail: 'ترکیب عرض/متراژ استاندارد/ستاپ این گروه‌ها در هیچ ستاپی تعریف نشده است.',
+   541→        action: 'rolls',
+   542→        drill: { source: 'rolls', filter: 'group', groupKeys: unmatchedGroups.map((g) => g.key) },
+   543→      });
+   544→    }
+   545→
+   546→    // د) مازاد متالایز تخصیص‌نیافته (§44)
+   547→    if (metUnallocatedTotal.total > 0) {
+   548→      warnings.push({
+   549→        type: 'metallized-surplus',
+   550→        severity: 'warning',
+   551→        title: `${U.faNum(metUnallocatedTotal.total)} رول متالایز تخصیص‌نیافته`,
+   552→        detail: 'تعداد متالایزهای یونیک بیش از مجموع ظرفیت ستاپ‌های دارای کلید مشابه است.',
+   553→        action: 'setup',
+   554→        drill: {
+   555→          source: 'archived',
+   556→          filter: 'metallized-unallocated',
+   557→          groupKeys: metUnallocatedTotal.keys.map((k) => k.key),
+   558→        },
+   559→      });
+   560→    }
+   561→
+   562→    // هـ) رول‌های خام تخصیص‌نیافته (به دلیل ظرفیت)
+   563→    if (rawUnallocatedTotal.total > 0) {
+   564→      warnings.push({
+   565→        type: 'raw-surplus',
+   566→        severity: 'warning',
+   567→        title: `${U.faNum(rawUnallocatedTotal.total)} رول خام تخصیص‌نیافته`,
+   568→        detail: 'ظرفیت ستاپ‌های منطبق برای پوشش تمام رول‌های خام کافی نیست.',
+   569→        action: 'setup',
+   570→        drill: {
+   571→          source: 'rolls',
+   572→          filter: 'group',
+   573→          groupKeys: rawUnallocatedTotal.keys.map((k) => k.key),
+   574→        },
+   575→      });
+   576→    }
+   577→
+   578→    // و) مغایرت ظرفیت در گزارش ستاپ (§86)
+   579→    const conflicts = setupReport.filter((r) => r.conflict > 0);
+   580→    if (conflicts.length) {
+   581→      warnings.push({
+   582→        type: 'capacity-conflict',
+   583→        severity: 'error',
+   584→        title: `${U.faNum(conflicts.length)} ستاپ با مغایرت ظرفیت`,
+   585→        detail: 'مجموع خام موجود + متالایزِ تخصیص‌یافته از تعداد رول ستاپ بیشتر است (در ستون برش‌نشده ستاره‌دار نمایش داده می‌شود).',
+   586→        action: 'setup',
+   587→        drill: { source: 'setups', filter: 'capacity-conflict' },
+   588→      });
+   589→    }
+   590→
+   591→    // ز) ستاپ‌های ناقص قدیمی (پس از مهاجرت)
+   592→    const incomplete = setupRolls.filter((s) => s.thickness === null || s.standardLength === null);
+   593→    if (incomplete.length) {
+   594→      warnings.push({
+   595→        type: 'incomplete-setup',
+   596→        severity: 'warning',
+   597→        title: `${U.faNum(incomplete.length)} رکورد ستاپ ناقص`,
+   598→        detail: 'رکوردهای قدیمی فاقد ضخامت/متراژ استاندارد هستند؛ برای شرکت در محاسبات ویرایش و تکمیل شوند.',
+   599→        action: 'setup',
+   600→        drill: { source: 'setups', filter: 'incomplete' },
+   601→      });
+   602→    }
+   603→
+   604→    // ح) هم‌پوشانی قوانین (دفاع مرکزی — در ذخیره مسدود است §18)
+   605→    const overlapPairs = [];
+   606→    const rulesByThickness = new Map();
+   607→    for (const rule of rules) {
+   608→      if (!rulesByThickness.has(rule.thickness)) rulesByThickness.set(rule.thickness, []);
+   609→      rulesByThickness.get(rule.thickness).push(rule);
+   610→    }
+   611→    for (const list of rulesByThickness.values()) {
+   612→      for (let i = 0; i < list.length; i++) {
+   613→        for (let j = i + 1; j < list.length; j++) {
+   614→          if (R.findOverlap(list[i], [list[j]])) overlapPairs.push([list[i], list[j]]);
+   615→        }
+   616→      }
+   617→    }
+   618→    if (overlapPairs.length) {
+   619→      warnings.push({
+   620→        type: 'rule-overlap',
+   621→        severity: 'error',
+   622→        title: `${U.faNum(overlapPairs.length)} جفت قانون هم‌پوشان شناسایی شد`,
+   623→        detail: 'قوانین هم‌پوشان نباید ذخیره شوند؛ لطفاً بازبینی و اصلاح کنید.',
+   624→        action: 'settings',
+   625→        drill: { source: 'rules', filter: 'overlap', pairs: overlapPairs },
+   626→      });
+   627→    }
+   628→
+   629→    // ط) داده‌های ناقص اکسل — به تفکیک Dataset و نوع نقص (هر کدام Drill-down مستقل)
+   630→    const DATASET_LABELS = RM.config.DATASET_LABELS;
+   631→    const ISSUE_META = [
+   632→      { issue: 'width',      label: 'بدون عرض' },
+   633→      { issue: 'length',     label: 'بدون متراژ' },
+   634→      { issue: 'thickness',  label: 'بدون ضخامت' },
+   635→      { issue: 'rollNumber', label: 'شماره رول نامعتبر (خالی)' },
+   636→      { issue: 'filmType',   label: 'نوع فیلم نامعتبر (خالی)' },
+   637→    ];
+   638→    const datasets = [
+   639→      { source: 'rolls', records: rolls },
+   640→      { source: 'archived', records: archivedRolls },
+   641→    ];
+   642→    for (const { source, records: dsRecords } of datasets) {
+   643→      for (const meta of ISSUE_META) {
+   644→        // رزولور مشترک نقص‌ها («length» → actualLength در مدل داخلی)
+   645→        const count = N.recordsWithIssue(dsRecords, meta.issue).length;
+   646→        if (count > 0) {
+   647→          warnings.push({
+   648→            type: `missing-${meta.issue}-${source}`,
+   649→            severity: 'warning',
+   650→            title: `${meta.label} (${DATASET_LABELS[source]}): ${U.faNum(count)}`,
+   651→            detail: 'رکوردهای عامل این هشدار قابل مشاهده‌اند — دکمهٔ «مشاهده» را بزنید.',
+   652→            action: 'import',
+   653→            drill: { source, issue: meta.issue },
+   654→          });
+   655→        }
+   656→      }
+   657→    }
+   658→
+   659→    // ی) Mapping ناقص — فیلدهایی که کاربر تنظیم کرده اما ستونشان در فایل نبوده
+   660→    for (const meta of (importMetadata || [])) {
+   661→      const gaps = (meta && Array.isArray(meta.mappingGaps)) ? meta.mappingGaps : [];
+   662→      if (!gaps.length) continue;
+   663→      const fieldNames = gaps.map((g) => RM.config.FIELD_LABELS[g.field] || g.field).join('، ');
+   664→      warnings.push({
+   665→        type: `mapping-incomplete-${meta.target}`,
+   666→        severity: 'warning',
+   667→        title: `Mapping ناقص (${DATASET_LABELS[meta.target] || meta.target})`,
+   668→        detail: `ستون تنظیم‌شده برای فیلدهای ${fieldNames} در فایل «${U.truncate(meta.fileName || '', 30)}» یافت نشد؛ این فیلدها برای رکوردها مقدار ندارند.`,
+   669→        action: 'settings',
+   670→        drill: { source: meta.target, filter: 'all' },
+   671→      });
+   672→    }
+   673→
+   674→    /* --- ۱۰) خلاصهٔ داشبورد (§57-§59 + زمان‌های متالایز — تغییرات جدید) --- */
+   675→    const totalSetupRolls = setupRolls.reduce((s, r) => s + (r.rollCount || 0), 0);
+   676→    const totalRawAllocated = [...rawAllocationBySetup.values()].reduce((s, a) => s + a.allocated, 0);
+   677→    const totalMetAllocated = [...metAllocationBySetup.values()].reduce((s, a) => s + a.allocated, 0);
+   678→    const totalUncut = setupReport.reduce((s, r) => s + r.uncut, 0);
+   679→    const totalConflict = setupReport.reduce((s, r) => s + r.conflict, 0);
+   680→
+   681→    /* --- مانده زمان‌ها: کل + به تفکیک دستگاه (فقط رکوردهای دارای قانون) --- */
+   682→    const totalRemainingSetupTime = setupReport.reduce(
+   683→      (s, r) => s + (r.remainingSetupTime || 0), 0
+   684→    );
+   685→    const totalRemainingProducedTime = setupReport.reduce(
+   686→      (s, r) => s + (r.remainingProducedTime || 0), 0
+   687→    );
+   688→    const machineTime = {};
+   689→    let timeCovered = 0;
+   690→    let timeUncovered = 0;
+   691→    for (const r of setupReport) {
+   692→      if (r.remainingSetupTime === null) {
+   693→        if (r.thickness !== null && r.standardLength !== null) timeUncovered++;
+   694→        continue;
+   695→      }
+   696→      timeCovered++;
+   697→      const m = r.machineNumber;
+   698→      if (!machineTime[m]) machineTime[m] = { setup: 0, produced: 0, records: 0 };
+   699→      machineTime[m].setup += r.remainingSetupTime;
+   700→      machineTime[m].produced += r.remainingProducedTime || 0;
+   701→      machineTime[m].records++;
+   702→    }
+   703→
+   704→    const summary = {
+   705→      rawRollsCount: rawRolls.length,           // کل رول‌های خام فعلی (§58)
+   706→      rawMatchedCount: totalRawAllocated,       // خامِ تطبیق‌شده با ستاپ‌ها
+   707→      metallizedCount: metallized.uniqueCount, // متالایز یونیک (§59)
+   708→      metallizedAllocated: totalMetAllocated,
+   709→      totalSetupRolls,                          // Σ تعداد ستاپ‌ها (§57)
+   710→      totalUncut,                               // Σ برش‌نشده نمایشی (§51)
+   711→      totalConflict,                            // Σ مغایرت ظرفیت (§86)
+   712→      rawUnallocated: rawUnallocatedTotal.total,
+   713→      metallizedUnallocated: metUnallocatedTotal.total,
+   714→      totalGroups: rawRollGroups.length,
+   715→      matchedGroups: rawRollGroups.length - unmatchedGroups.length,
+   716→      /* --- زمان متالایز (تغییرات جدید) --- */
+   717→      totalRemainingSetupTime,
+   718→      totalRemainingProducedTime,
+   719→      machineTime,
+   720→      timeRuleCoverage: { covered: timeCovered, uncovered: timeUncovered },
+   721→      timeRulesCount: timeRules.length,
+   722→      /* --- رول‌های برش‌خورده (تغییرات جدید) --- */
+   723→      cutRollsCount: cutRolls.stats.totalRecords,
+   724→      cutRollsFound: cutRolls.stats.cutRollsFound,
+   725→    };
+   726→
+   727→    return {
+   728→      rawRollGroups,
+   729→      unmatchedGroups,
+   730→      metallizedGroups: metallized.groups,
+   731→      metallizedUniqueCount: metallized.uniqueCount,
+   732→      metallizedUniqueRecords: metallized.uniqueRecords,   // برای Drill-down مازاد متالایز
+   733→      setupReport,
+   734→      cutRolls,
+   735→      warnings,
+   736→      summary,
+   737→      meta: {
+   738→        rawUnallocatedKeys: rawUnallocatedTotal.keys,
+   739→        metUnallocatedKeys: metUnallocatedTotal.keys,
+   740→        noRuleCount,
+   741→        timeRules,
+   742→      },
+   743→    };
+   744→  }
+   745→
+   746→  /* ================================================================
+   747→     ۵) مدیریت Cache (§55 — محاسبهٔ مجدد فقط در تغییر داده)
+   748→     ================================================================ */
+   749→
+   750→  /** اعلام کثیف‌بودن Cache — پس از هر تغییر داده فراخوانی می‌شود */
+   751→  Calc.invalidate = function () {
+   752→    Calc._dirty = true;
+   753→  };
+   754→
+   755→  /** دریافت وضعیت محاسبه‌شده (با Cache) */
+   756→  Calc.getState = async function () {
+   757→    if (Calc._dirty || !Calc._cached) {
+   758→      Calc._cached = await calculateProductionState();
+   759→      Calc._dirty = false;
+   760→    }
+   761→    return Calc._cached;
+   762→  };
+   763→
+   764→  RM.calcEngine = Calc;
+   765→})();
+   766→

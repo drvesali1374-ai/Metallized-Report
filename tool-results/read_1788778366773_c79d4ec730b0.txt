@@ -1,0 +1,712 @@
+     1→/* =========================================================================
+     2→   views/settings.js — نما تنظیمات (§15-§18، §61-§63، §12، §60)
+     3→   -------------------------------------------------------------------------
+     4→   بخش‌ها:
+     5→     ۱) مدیریت قوانین متراژ استاندارد (CRUD + اعتبارسنجی هم‌پوشانی)
+     6→     ۲) پشتیبان‌گیری / بازیابی (Backup / Restore با تأیید §70)
+     7→     ۳) مدیریت داده‌ها (پاک‌سازی Datasetها)
+     8→     ۴) اطلاعات Importها (سابقه + نسخه‌بندی §60)
+     9→     ۵) مرتب‌سازی پیش‌فرض (اطلاع + بازنشانی)
+    10→     + هشدار مهم Backup (§62)
+    11→   ========================================================================= */
+    12→
+    13→'use strict';
+    14→
+    15→(function () {
+    16→  const U = RM.utils;
+    17→  const UI = RM.ui;
+    18→  const Rules = RM.rulesEngine;
+    19→  const Backup = RM.backupEngine;
+    20→  const db = RM.db.db;
+    21→
+    22→  const SettingsView = {};
+    23→
+    24→  /** تعداد رکوردهای پیش‌فرض سابقهٔ Import (قابل توسعه توسط کاربر) */
+    25→  const HISTORY_PAGE = 5;
+    26→
+    27→  /* ================================================================
+    28→     ۱) راه‌اندازی
+    29→     ================================================================ */
+    30→
+    31→  SettingsView.init = function () {
+    32→    // فرم قانون متراژ
+    33→    document.getElementById('rule-form').addEventListener('submit', (e) => {
+    34→      e.preventDefault();
+    35→      SettingsView.saveRule();
+    36→    });
+    37→    document.getElementById('rule-cancel-edit').addEventListener('click', () => {
+    38→      SettingsView.resetRuleForm();
+    39→    });
+    40→
+    41→    // Backup
+    42→    document.getElementById('btn-backup-export').addEventListener('click', SettingsView.exportBackup);
+    43→    document.getElementById('file-restore').addEventListener('change', (e) => {
+    44→      if (e.target.files && e.target.files[0]) {
+    45→        SettingsView.restoreBackup(e.target.files[0]);
+    46→        e.target.value = '';
+    47→      }
+    48→    });
+    49→    document.getElementById('btn-restore-pick').addEventListener('click', () => {
+    50→      document.getElementById('file-restore').click();
+    51→    });
+    52→
+    53→    // مدیریت داده‌ها (عناوین کاربرپسنده — نام فنی فقط برای Audit)
+    54→    document.getElementById('btn-clear-rolls').addEventListener('click', () =>
+    55→      SettingsView.clearDataset('rolls', 'رول‌های موجود', 'rolls'));
+    56→    document.getElementById('btn-clear-archived').addEventListener('click', () =>
+    57→      SettingsView.clearDataset('archived', 'سابقه رول‌ها (آرشیو)', 'archivedRolls'));
+    58→
+    59→    document.getElementById('btn-clear-all').addEventListener('click', SettingsView.clearEverything);
+    60→
+    61→    // انتخاب تم (روشن/تاریک) — بدون تغییر در تم روشن فعلی
+    62→    SettingsView.initThemePicker();
+    63→  };
+    64→
+    65→  /* ================================================================
+    66→     ۱-ب) انتخاب تم (روشن/تاریک) — ذخیره در localStorage همان مرورگر
+    67→     ================================================================ */
+    68→
+    69→  SettingsView.THEME_KEY = 'rm-theme';
+    70→
+    71→  SettingsView.initThemePicker = function () {
+    72→    const buttons = document.querySelectorAll('[data-theme-pick]');
+    73→    if (!buttons.length) return;
+    74→
+    75→    const apply = (theme, { persist = true, notify = false } = {}) => {
+    76→      if (theme === 'dark') {
+    77→        document.documentElement.setAttribute('data-theme', 'dark');
+    78→      } else {
+    79→        document.documentElement.removeAttribute('data-theme');
+    80→      }
+    81→      if (persist) {
+    82→        try { localStorage.setItem(SettingsView.THEME_KEY, theme); } catch { /* حالت خصوصی */ }
+    83→      }
+    84→      // به‌روزرسانی وضعیت دکمه‌ها
+    85→      buttons.forEach((btn) => {
+    86→        const active = btn.dataset.themePick === theme;
+    87→        btn.classList.toggle('active', active);
+    88→        btn.setAttribute('aria-checked', String(active));
+    89→      });
+    90→      if (notify) {
+    91→        UI.toast(theme === 'dark' ? 'تم تاریک فعال شد.' : 'تم روشن فعال شد.', 'success');
+    92→      }
+    93→    };
+    94→
+    95→    // مقدار ذخیره‌شده (پیش‌فرض: روشن)
+    96→    let current = 'light';
+    97→    try { current = localStorage.getItem(SettingsView.THEME_KEY) || 'light'; } catch { /* — */ }
+    98→    apply(current, { persist: false });
+    99→
+   100→    buttons.forEach((btn) => {
+   101→      btn.addEventListener('click', () => apply(btn.dataset.themePick));
+   102→    });
+   103→  };
+   104→
+   105→  /* ================================================================
+   106→     ۲) قوانین متراژ استاندارد (§15-§18)
+   107→     ================================================================ */
+   108→
+   109→  const ruleInput = () => ({
+   110→    thickness: document.getElementById('r-thickness').value,
+   111→    minLength: document.getElementById('r-min').value,
+   112→    maxLength: document.getElementById('r-max').value,
+   113→    standardLength: document.getElementById('r-standard').value,
+   114→  });
+   115→
+   116→  let editingRuleId = null;
+   117→
+   118→  SettingsView.saveRule = async function () {
+   119→    const form = document.getElementById('rule-form');
+   120→    UI.clearFormErrors(form);
+   121→
+   122→    const input = ruleInput();
+   123→    const errMap = {
+   124→      thickness: document.getElementById('err-r-thickness'),
+   125→      minLength: document.getElementById('err-r-min'),
+   126→      maxLength: document.getElementById('err-r-max'),
+   127→      standardLength: document.getElementById('err-r-standard'),
+   128→    };
+   129→
+   130→    const result = editingRuleId === null
+   131→      ? await Rules.create(input)
+   132→      : await Rules.update(editingRuleId, input);
+   133→
+   134→    if (!result.ok) {
+   135→      // خطاهای Field-Level (§69)
+   136→      if (result.errors) {
+   137→        let first = null;
+   138→        for (const [field, errEl] of Object.entries(errMap)) {
+   139→          const msg = result.errors[field];
+   140→          const inputEl = document.getElementById(`r-${field === 'minLength' ? 'min' : field === 'maxLength' ? 'max' : field === 'standardLength' ? 'standard' : 'thickness'}`);
+   141→          UI.setFieldError(inputEl, errEl, msg);
+   142→          if (msg && !first) first = inputEl;
+   143→        }
+   144→        if (first) first.focus();
+   145→      }
+   146→      if (result.message) UI.toast(U.escapeHtml(result.message), 'error', 6500);
+   147→      return;
+   148→    }
+   149→
+   150→    UI.toast(
+   151→      editingRuleId === null
+   152→        ? 'قانون متراژ استاندارد جدید ذخیره شد.'
+   153→        : 'قانون ویرایش شد.',
+   154→      'success'
+   155→    );
+   156→
+   157→    SettingsView.resetRuleForm();
+   158→    await RM.refreshAll();       // تغییر قانون → محاسبات و گروه‌بندی تازه (§90)
+   159→    await SettingsView.renderRules();
+   160→  };
+   161→
+   162→  SettingsView.startEditRule = async function (id) {
+   163→    const rule = await db.standardLengthRules.get(id);
+   164→    if (!rule) return;
+   165→
+   166→    editingRuleId = id;
+   167→    document.getElementById('r-thickness').value = String(rule.thickness);
+   168→    document.getElementById('r-min').value = String(rule.minLength);
+   169→    document.getElementById('r-max').value = String(rule.maxLength);
+   170→    document.getElementById('r-standard').value = String(rule.standardLength);
+   171→
+   172→    document.getElementById('rule-form-title').textContent = 'ویرایش قانون متراژ';
+   173→    document.getElementById('btn-rule-save').textContent = 'ذخیرهٔ تغییرات';
+   174→    document.getElementById('rule-cancel-edit').hidden = false;
+   175→    document.getElementById('r-thickness').focus();
+   176→  };
+   177→
+   178→  SettingsView.resetRuleForm = function () {
+   179→    editingRuleId = null;
+   180→    const form = document.getElementById('rule-form');
+   181→    form.reset();
+   182→    UI.clearFormErrors(form);
+   183→
+   184→    document.getElementById('rule-form-title').textContent = 'تعریف قانون متراژ استاندارد جدید';
+   185→    document.getElementById('btn-rule-save').textContent = 'ذخیره قانون';
+   186→    document.getElementById('rule-cancel-edit').hidden = true;
+   187→  };
+   188→
+   189→  SettingsView.removeRule = async function (id) {
+   190→    const ok = await UI.confirm({
+   191→      title: 'حذف قانون متراژ',
+   192→      message: 'با حذف این قانون، رول‌های پوشش‌داده‌شده توسط آن قابل تطبیق با ستاپ‌ها نخواهند بود. ادامه می‌دهید؟',
+   193→      confirmText: 'بله، حذف کن',
+   194→      danger: true,
+   195→    });
+   196→    if (!ok) return;
+   197→
+   198→    await Rules.remove(id);
+   199→    UI.toast('قانون حذف شد و محاسبات به‌روزرسانی گردید.', 'success');
+   200→    await RM.refreshAll();
+   201→    await SettingsView.renderRules();
+   202→  };
+   203→
+   204→  /** رندر جدول قوانین (گروه‌بندی بر اساس ضخامت) */
+   205→  SettingsView.renderRules = async function () {
+   206→    const rules = await db.standardLengthRules.toArray();
+   207→    const wrap = document.getElementById('rules-table-wrap');
+   208→
+   209→    if (!rules.length) {
+   210→      wrap.innerHTML = `
+   211→        <div class="empty-state">
+   212→          ${UI.icons.alert}
+   213→          <p>هیچ قانونی تعریف نشده است.<br>
+   214→          بدون قوانین متراژ، رول‌ها استانداردسازی نمی‌شوند و تطبیقی انجام نمی‌شود (§17).</p>
+   215→        </div>`;
+   216→      return;
+   217→    }
+   218→
+   219→    // مرتب‌سازی: ضخامت سپس حداقل
+   220→    rules.sort((a, b) => a.thickness - b.thickness || a.minLength - b.minLength);
+   221→
+   222→    let html = '<div class="table-wrap"><table class="data-table"><thead><tr>' +
+   223→      '<th>ضخامت (μ)</th><th>حداقل متراژ</th><th>حداکثر متراژ</th><th>متراژ استاندارد</th><th>عملیات</th>' +
+   224→      '</tr></thead><tbody>';
+   225→
+   226→    let prevThickness = null;
+   227→    for (const rule of rules) {
+   228→      const isBoundaryRow = prevThickness !== null && rule.thickness !== prevThickness;
+   229→      html += `<tr${isBoundaryRow ? ' class="group-boundary"' : ''}>
+   230→        <td class="thickness-cell">${U.faNum(rule.thickness)}</td>
+   231→        <td>${U.faNum(rule.minLength)}</td>
+   232→        <td>${U.faNum(rule.maxLength)}</td>
+   233→        <td class="count-cell">${U.faNum(rule.standardLength)}</td>
+   234→        <td>
+   235→          <div class="row-actions">
+   236→            <button type="button" class="btn btn-ghost btn-icon" data-rule-edit="${rule.id}" title="ویرایش" aria-label="ویرایش قانون">${UI.icons.edit}</button>
+   237→            <button type="button" class="btn btn-icon" data-rule-del="${rule.id}" title="حذف" aria-label="حذف قانون">${UI.icons.trash}</button>
+   238→          </div>
+   239→        </td>
+   240→      </tr>`;
+   241→      prevThickness = rule.thickness;
+   242→    }
+   243→    html += '</tbody></table></div>';
+   244→    wrap.innerHTML = html;
+   245→
+   246→    wrap.querySelectorAll('[data-rule-edit]').forEach((btn) =>
+   247→      btn.addEventListener('click', () => SettingsView.startEditRule(Number(btn.dataset.ruleEdit)))
+   248→    );
+   249→    wrap.querySelectorAll('[data-rule-del]').forEach((btn) =>
+   250→      btn.addEventListener('click', () => SettingsView.removeRule(Number(btn.dataset.ruleDel)))
+   251→    );
+   252→  };
+   253→
+   254→  /* ================================================================
+   255→     ۳) Backup / Restore (§61-§62)
+   256→     ================================================================ */
+   257→
+   258→  SettingsView.exportBackup = async function () {
+   259→    try {
+   260→      const { fileName, counts } = await Backup.exportFile();
+   261→      UI.toast(
+   262→        `پشتیبان «${U.escapeHtml(fileName)}» ساخته شد — ` +
+   263→        `${U.faNum(counts.setupRolls)} ستاپ · ${U.faNum(counts.standardLengthRules)} قانون · ` +
+   264→        `${U.faNum(counts.rolls + counts.archivedRolls)} رکورد اکسل`,
+   265→        'success',
+   266→        6000
+   267→      );
+   268→    } catch (err) {
+   269→      console.error('[Backup]', err);
+   270→      UI.toast('خطا در ساخت فایل پشتیبان.', 'error');
+   271→    }
+   272→  };
+   273→
+   274→  SettingsView.restoreBackup = async function (file) {
+   275→    try {
+   276→      // خواندن و اعتبارسنجی ساختار (§72: Backup Corrupted)
+   277→      const text = await file.text();
+   278→      let payload;
+   279→      try {
+   280→        payload = JSON.parse(text);
+   281→      } catch {
+   282→        UI.toast('فایل پشتیبان معتبر نیست (JSON نامعتبر).', 'error');
+   283→        return;
+   284→      }
+   285→
+   286→      const check = Backup.validate(payload);
+   287→      if (!check.ok) {
+   288→        UI.toast(`فایل پشتیبان معتبر نیست: ${U.escapeHtml(check.errors[0] || '')}`, 'error', 7000);
+   289→        return;
+   290→      }
+   291→
+   292→      const c = payload.counts;
+   293→
+   294→      // تأیید بازیابی (§70 — عملیات خطرناک)
+   295→      const ok = await UI.confirm({
+   296→        title: 'تأیید بازیابی Backup',
+   297→        html: `<div class="confirm-stats">
+   298→          <div>ستاپ‌ها: <b>${U.faNum(c.setupRolls)}</b> · قوانین: <b>${U.faNum(c.standardLengthRules)}</b></div>
+   299→          <div>رکوردهای rolls: <b>${U.faNum(c.rolls)}</b> · آرشیو: <b>${U.faNum(c.archivedRolls)}</b></div>
+   300→          <div>تاریخ پشتیبان: <b>${U.faDate(payload.exportedAt)}</b></div>
+   301→        </div>`,
+   302→        message: 'تمام داده‌های فعلی برنامه با محتوای این فایل جایگزین خواهد شد. ادامه می‌دهید؟',
+   303→        confirmText: 'بله، بازیابی کن',
+   304→        danger: true,
+   305→      });
+   306→      if (!ok) return;
+   307→
+   308→      const result = await Backup.restore(payload);
+   309→      if (!result.ok) {
+   310→        UI.toast(`بازیابی ناموفق: ${U.escapeHtml(result.errors[0] || '')}`, 'error');
+   311→        return;
+   312→      }
+   313→
+   314→      UI.toast('بازیابی با موفقیت انجام شد — همهٔ محاسبات به‌روزرسانی گردید.', 'success');
+   315→      await RM.refreshAll();
+   316→      await SettingsView.renderAll();
+   317→    } catch (err) {
+   318→      console.error('[Restore]', err);
+   319→      UI.toast('خطا در خواندن فایل پشتیبان.', 'error');
+   320→    }
+   321→  };
+   322→
+   323→  /* ================================================================
+   324→     ۴) مدیریت داده‌ها (§63)
+   325→     ================================================================ */
+   326→
+   327→  SettingsView.clearDataset = async function (targetKey, fileLabel, table) {
+   328→    const count = await db[table].count();
+   329→    if (!count) {
+   330→      UI.toast('این جدول از قبل خالی است.', 'info');
+   331→      return;
+   332→    }
+   333→
+   334→    const ok = await UI.confirm({
+   335→      title: 'پاک‌سازی Dataset',
+   336→      html: `<div class="confirm-stats"><div>رکوردهای ${U.escapeHtml(fileLabel)}: <b>${U.faNum(count)}</b> حذف خواهد شد.</div></div>`,
+   337→      message: 'برای بازگردانی، فایل اکسل را مجدداً Import کنید. ادامه می‌دهید؟',
+   338→      confirmText: 'بله، پاک کن',
+   339→      danger: true,
+   340→    });
+   341→    if (!ok) return;
+   342→
+   343→    await db.transaction('rw', db[table], async () => {
+   344→      await db[table].clear();
+   345→    });
+   346→    UI.toast('Dataset پاک‌سازی شد.', 'success');
+   347→    await RM.refreshAll();
+   348→    await SettingsView.renderAll();
+   349→  };
+   350→
+   351→  SettingsView.clearEverything = async function () {
+   352→    const ok = await UI.confirm({
+   353→      title: 'پاک‌سازی کامل برنامه',
+   354→      html: '<div class="confirm-warn">⚠ تمام داده‌ها (ستاپ‌ها، قوانین، Datasetها و تنظیمات) حذف می‌شوند.</div>',
+   355→      message: 'پیش از ادامه، در صورت نیاز Backup تهیه کنید. ادامه می‌دهید؟',
+   356→      confirmText: 'بله، همه‌چیز را پاک کن',
+   357→      danger: true,
+   358→    });
+   359→    if (!ok) return;
+   360→
+   361→    await db.transaction(
+   362→      'rw',
+   363→      [db.setupRolls, db.standardLengthRules, db.appSettings, db.importMetadata, db.rolls, db.archivedRolls],
+   364→      async () => {
+   365→        await Promise.all([
+   366→          db.setupRolls.clear(),
+   367→          db.standardLengthRules.clear(),
+   368→          db.appSettings.clear(),
+   369→          db.importMetadata.clear(),
+   370→          db.rolls.clear(),
+   371→          db.archivedRolls.clear(),
+   372→        ]);
+   373→      }
+   374→    );
+   375→
+   376→    UI.toast('برنامه به حالت اولیه بازگشت.', 'success');
+   377→    await RM.refreshAll();
+   378→    await SettingsView.renderAll();
+   379→  };
+   380→
+   381→  /* ================================================================
+   382→     ۵) اطلاعات Importها (§12، §60 — C)
+   383→        محدود به آخرین Importها (پیش‌فرض ۵ مورد) + دکمهٔ نمایش همه
+   384→     ================================================================ */
+   385→
+   386→  SettingsView._historyExpanded = false;
+   387→
+   388→  SettingsView.renderImportHistory = async function () {
+   389→    const wrap = document.getElementById('import-history-wrap');
+   390→    const entries = await db.importMetadata.orderBy('importedAt').reverse().toArray();
+   391→
+   392→    if (!entries.length) {
+   393→      wrap.innerHTML = '<p class="muted" style="font-size:.8rem">هنوز Importی انجام نشده است.</p>';
+   394→      return;
+   395→    }
+   396→
+   397→    // محدودیت نمایش: پیش‌فرض آخرین موارد — جدول بلند نشود
+   398→    const shown = SettingsView._historyExpanded ? entries : entries.slice(0, HISTORY_PAGE);
+   399→    const total = entries.length;
+   400→    const hiddenCount = total - shown.length;
+   401→
+   402→    const toggleBtn = hiddenCount > 0
+   403→      ? `<button type="button" class="btn btn-ghost btn-sm" data-history-toggle="expand">
+   404→           نمایش همه (${U.faNum(total)})
+   405→         </button>`
+   406→      : (SettingsView._historyExpanded && total > HISTORY_PAGE
+   407→        ? `<button type="button" class="btn btn-ghost btn-sm" data-history-toggle="collapse">
+   408→             نمایش ${U.faNum(HISTORY_PAGE)} مورد آخر
+   409→           </button>`
+   410→        : '');
+   411→
+   412→    // عنوان کاربرپسنده + نام واقعی فایل برای Audit/Traceability
+   413→    wrap.innerHTML = `
+   414→      <div class="history-meta">
+   415→        <span class="chip">${U.faNum(total)} Import ثبت‌شده</span>
+   416→        ${SettingsView._historyExpanded ? '' : `<span class="muted" style="font-size:.7rem">نمایش ${U.faNum(shown.length)} مورد آخر</span>`}
+   417→        ${toggleBtn}
+   418→      </div>
+   419→      <div class="table-wrap">
+   420→        <table class="data-table"><thead><tr>
+   421→          <th>نسخه</th><th>Dataset</th><th>نام فایل</th><th>وضعیت</th><th>تاریخ</th><th>رکورد</th><th>خام/یونیک</th><th>هش</th>
+   422→        </tr></thead><tbody>
+   423→          ${shown.map((e) => `<tr>
+   424→            <td>#${U.faNum(e.datasetVersion)}</td>
+   425→            <td>${U.escapeHtml(RM.config.DATASET_LABELS[e.target] || e.target)}</td>
+   426→            <td><code>${U.escapeHtml(U.truncate(e.fileName, 24))}</code></td>
+   427→            <td>${e.status === 'ok' ? '<span class="status-pill pill-ok">موفق</span>' : '—'}</td>
+   428→            <td>${U.faDate(e.importedAt)}</td>
+   429→            <td>${U.faNum(e.totalRecords)}</td>
+   430→            <td>${U.faNum(e.rawRolls)}</td>
+   431→            <td class="ltr" style="font-size:.68rem;color:var(--text-faint)">${U.escapeHtml(e.fileHash || '—')}</td>
+   432→          </tr>`).join('')}
+   433→        </tbody></table>
+   434→      </div>`;
+   435→
+   436→    // تغییر حالت نمایش (باز/بسته)
+   437→    wrap.querySelectorAll('[data-history-toggle]').forEach((btn) => {
+   438→      btn.addEventListener('click', async () => {
+   439→        SettingsView._historyExpanded = btn.dataset.historyToggle === 'expand';
+   440→        await SettingsView.renderImportHistory();
+   441→      });
+   442→    });
+   443→  };
+   444→
+   445→  /* ================================================================
+   446→     ۵) نگاشت ستون‌های اکسل (Mapping قابل تنظیم — §1 اصلاحات)
+   447→     ================================================================ */
+   448→
+   449→  /** رندر پنل Mapping برای هر دو Dataset (مستقل از یکدیگر) */
+   450→  SettingsView.renderMappingPanel = async function () {
+   451→    const wrap = document.getElementById('mapping-editor');
+   452→    if (!wrap) return;
+   453→
+   454→    const userMapping = await RM.normalize.getUserMapping();
+   455→    const N = RM.normalize;
+   456→    const html = [];
+   457→
+   458→    for (const sourceKey of Object.keys(RM.config.COLUMN_MAP)) {
+   459→      const target = RM.config.IMPORT_TARGETS[sourceKey];
+   460→      const overrides = userMapping[sourceKey] || {};
+   461→      const headers = await N.getDatasetHeaders(sourceKey);
+   462→      const mapping = N.buildFieldMapping(sourceKey, headers, overrides);
+   463→
+   464→      const fieldsHtml = Object.entries(RM.config.COLUMN_MAP[sourceKey]).map(([field, spec]) => {
+   465→        const labelTxt = RM.config.FIELD_LABELS[field] || field;
+   466→        const isOptional = !!spec.optional;
+   467→        const current = typeof overrides[field] === 'string' && overrides[field].trim() !== ''
+   468→          ? overrides[field] : '';
+   469→
+   470→        // رزولوشن خودکار فعلی برای راهنما
+   471→        const autoResolved = mapping[field];
+   472→        const hint = autoResolved
+   473→          ? `خودکار → «${U.escapeHtml(autoResolved)}»`
+   474→          : (isOptional ? 'خودکار → بدون ستون (اختیاری)' : 'خودکار → یافت نشد');
+   475→
+   476→        const options = ['<option value="">خودکار (پیش‌فرض)</option>']
+   477→          .concat(headers.map((h) =>
+   478→            `<option value="${U.escapeHtml(h)}" ${h === current ? 'selected' : ''}>${U.escapeHtml(h)}</option>`
+   479→          ))
+   480→          .join('');
+   481→
+   482→        return `
+   483→          <div class="field mapping-field">
+   484→            <label>${labelTxt} ${isOptional ? '<span class="unit">(اختیاری)</span>' : '<b class="req">*</b>'}</label>
+   485→            <select data-map-select="${field}" ${headers.length ? '' : 'disabled'}>
+   486→              ${current ? `<option value="${U.escapeHtml(current)}" selected>${U.escapeHtml(current)}</option>` : ''}
+   487→              ${options}
+   488→            </select>
+   489→            <p class="field-hint mapping-hint">${hint}</p>
+   490→            <p class="field-error" data-map-error="${field}" hidden></p>
+   491→          </div>`;
+   492→      }).join('');
+   493→
+   494→      html.push(`
+   495→        <div class="mapping-section">
+   496→          <h4 class="mapping-section-title">
+   497→            ${U.escapeHtml(target.label)}
+   498→            ${headers.length
+   499→              ? `<span class="chip chip-ok">${U.faNum(headers.length)} ستون شناسایی‌شده</span>`
+   500→              : '<span class="chip">Dataset وارد نشده</span>'}
+   501→          </h4>
+   502→          ${headers.length ? '' : '<p class="muted" style="font-size:.72rem">برای انتخاب ستون‌ها ابتدا فایل مربوطه را در تب «ورود داده‌ها» Import کنید؛ تا آن زمان مقادیر پیش‌فرض اعمال می‌شود. نام واقعی فایل پس از Import در همان تب برای Audit نمایش داده می‌شود.</p>'}
+   503→          <div class="mapping-grid">${fieldsHtml}</div>
+   504→          <div class="field-actions">
+   505→            <button type="button" class="btn btn-primary btn-sm" data-map-save="${sourceKey}">ذخیرهٔ نگاشت این Dataset</button>
+   506→            <button type="button" class="btn btn-ghost btn-sm" data-map-reset="${sourceKey}">بازگردانی به پیش‌فرض</button>
+   507→          </div>
+   508→        </div>`);
+   509→    }
+   510→
+   511→    wrap.innerHTML = html.join('');
+   512→
+   513→    // رویدادها
+   514→    wrap.querySelectorAll('[data-map-save]').forEach((btn) =>
+   515→      btn.addEventListener('click', () => SettingsView.saveMapping(btn.dataset.mapSave))
+   516→    );
+   517→    wrap.querySelectorAll('[data-map-reset]').forEach((btn) =>
+   518→      btn.addEventListener('click', () => SettingsView.resetMapping(btn.dataset.mapReset))
+   519→    );
+   520→  };
+   521→
+   522→  /** جمع‌آوری Overrideهای کاربر از فرم یک Dataset */
+   523→  SettingsView.collectMapping = function (sourceKey) {
+   524→    const section = document.querySelector(`.mapping-section [data-map-save="${sourceKey}"]`).closest('.mapping-section');
+   525→    const overrides = {};
+   526→    section.querySelectorAll('[data-map-select]').forEach((sel) => {
+   527→      if (sel.value.trim() !== '') overrides[sel.dataset.mapSelect] = sel.value;
+   528→    });
+   529→    return { overrides, section };
+   530→  };
+   531→
+   532→  /**
+   533→   * ذخیرهٔ Mapping یک Dataset:
+   534→   *  ۱) اعتبارسنجی: هر ستون انتخاب‌شده باید در Dataset فعلی وجود داشته باشد
+   535→   *  ۲) ذخیره در appSettings (columnMapping — مستقل برای هر Dataset)
+   536→   *  ۳) اگر Dataset موجود باشد: بازسازی تراکنشی رکوردها با Mapping جدید
+   537→   */
+   538→  SettingsView.saveMapping = async function (sourceKey) {
+   539→    const N = RM.normalize;
+   540→    const { overrides, section } = SettingsView.collectMapping(sourceKey);
+   541→    const headers = await N.getDatasetHeaders(sourceKey);
+   542→    const normalizedHeaders = new Set(headers.map((h) => U.normalizeHeader(h)));
+   543→
+   544→    // پاک‌کردن خطاهای قبلی
+   545→    section.querySelectorAll('[data-map-error]').forEach((el) => {
+   546→      el.textContent = '';
+   547→      el.hidden = true;
+   548→    });
+   549→    section.querySelectorAll('select.invalid').forEach((el) => el.classList.remove('invalid'));
+   550→
+   551→    // --- اعتبارسنجی ستون‌های انتخاب‌شده ---
+   552→    let hasError = false;
+   553→    let firstInvalid = null;
+   554→    for (const [field, header] of Object.entries(overrides)) {
+   555→      if (!normalizedHeaders.has(U.normalizeHeader(header))) {
+   556→        if (headers.length) {
+   557→          // Dataset موجود است اما ستون انتخاب‌شده در آن نیست
+   558→          const errEl = section.querySelector(`[data-map-error="${field}"]`);
+   559→          const sel = section.querySelector(`[data-map-select="${field}"]`);
+   560→          const labelTxt = RM.config.FIELD_LABELS[field] || field;
+   561→          if (errEl) {
+   562→            errEl.textContent = `ستون «${header}» در Dataset فعلی «${RM.config.DATASET_LABELS[sourceKey]}» وجود ندارد.`;
+   563→            errEl.hidden = false;
+   564→          }
+   565→          if (sel) sel.classList.add('invalid');
+   566→          if (!firstInvalid) firstInvalid = sel;
+   567→          hasError = true;
+   568→        }
+   569→        // اگر Dataset وارد نشده باشد، اعتبارسنجی ممکن نیست — بعد از Import بررسی می‌شود
+   570→      }
+   571→    }
+   572→
+   573→    if (hasError) {
+   574→      UI.toast('ذخیرهٔ Mapping انجام نشد — ستون‌های انتخابی را بررسی کنید.', 'error', 6000);
+   575→      if (firstInvalid) firstInvalid.focus();
+   576→      return;
+   577→    }
+   578→
+   579→    // --- ذخیره + بازسازی ---
+   580→    try {
+   581→      const userMapping = await N.getUserMapping();
+   582→      const nextMapping = { ...userMapping, [sourceKey]: overrides };
+   583→      const target = RM.config.IMPORT_TARGETS[sourceKey];
+   584→      const table = RM.db.db[target.table];
+   585→      const mapping = N.buildFieldMapping(sourceKey, headers, overrides);
+   586→
+   587→      let rebuiltCount = 0;
+   588→      let recomputedIssues = null;
+   589→
+   590→      await RM.db.db.transaction('rw', table, RM.db.db.appSettings, RM.db.db.importMetadata, async () => {
+   591→        // ذخیرهٔ تنظیمات
+   592→        await RM.db.db.appSettings.put({ key: 'columnMapping', value: nextMapping });
+   593→
+   594→        // بازسازی تراکنشی رکوردهای Dataset با Mapping جدید
+   595→        const existing = await table.toArray();
+   596→        if (existing.length && existing.some((r) => r.raw)) {
+   597→          const fresh = existing.map((r) => {
+   598→            if (!r.raw) return r;   // رکورد بدون سطر خام — دست‌نخورده
+   599→            const { record } = N.normalizeRow(r.raw, sourceKey, mapping);
+   600→            return { ...record, id: r.id };
+   601→          });
+   602→          await table.clear();
+   603→          await table.bulkPut(fresh);
+   604→          rebuiltCount = fresh.length;
+   605→
+   606→          // به‌روزرسانی Issues در متادیتای آخرین Import
+   607→          const issues = { width: 0, length: 0, thickness: 0, setupNumber: 0, rollNumber: 0, filmType: 0 };
+   608→          for (const r of fresh) {
+   609→            if (r.width === null) issues.width++;
+   610→            if (r.actualLength === null) issues.length++;
+   611→            if (r.thickness === null) issues.thickness++;
+   612→            if (r.setupNumber === null) issues.setupNumber++;
+   613→            if (r.rollNumber === '') issues.rollNumber++;
+   614→            if (r.filmType === '') issues.filmType++;
+   615→          }
+   616→          recomputedIssues = issues;
+   617→        }
+   618→
+   619→        // به‌روزرسانی متادیتا (Issues + Mapping Gaps تازه)
+   620→        const meta = await RM.db.getLatestImportMeta(sourceKey);
+   621→        if (meta) {
+   622→          const patch = { issues: recomputedIssues || meta.issues, mappingGaps: mapping.__invalid || [] };
+   623→          await RM.db.db.importMetadata.update(meta.id, patch);
+   624→        }
+   625→      });
+   626→
+   627→      UI.toast(
+   628→        rebuiltCount
+   629→          ? `Mapping ذخیره شد و ${U.faNum(rebuiltCount)} رکورد «${RM.config.DATASET_LABELS[sourceKey]}» با نگاشت جدید بازسازی شد.`
+   630→          : 'Mapping ذخیره شد.' + (headers.length ? '' : ' (Dataset وارد نشده — پس از Import اعمال می‌شود)'),
+   631→        'success',
+   632→        6000
+   633→      );
+   634→
+   635→      await RM.refreshAll();
+   636→      await SettingsView.renderMappingPanel();
+   637→    } catch (err) {
+   638→      console.error('[SaveMapping]', err);
+   639→      UI.toast('خطا در ذخیرهٔ Mapping — تغییری اعمال نشد.', 'error');
+   640→    }
+   641→  };
+   642→
+   643→  /** بازگردانی Mapping یک Dataset به پیش‌فرض (حذف Overrideهای کاربر) */
+   644→  SettingsView.resetMapping = async function (sourceKey) {
+   645→    const ok = await UI.confirm({
+   646→      title: 'بازگردانی Mapping به پیش‌فرض',
+   647→      message: `انتخاب‌های سفارشی شما برای «${RM.config.DATASET_LABELS[sourceKey]}» حذف و نگاشت پیش‌فرض اعمال می‌شود. رکوردهای Dataset با نگاشت پیش‌فرض بازسازی خواهند شد. ادامه می‌دهید؟`,
+   648→      confirmText: 'بله، بازگردانی کن',
+   649→    });
+   650→    if (!ok) return;
+   651→
+   652→    const userMapping = await RM.normalize.getUserMapping();
+   653→    const nextMapping = { ...userMapping };
+   654→    delete nextMapping[sourceKey];
+   655→
+   656→    try {
+   657→      const target = RM.config.IMPORT_TARGETS[sourceKey];
+   658→      const table = RM.db.db[target.table];
+   659→      const headers = await RM.normalize.getDatasetHeaders(sourceKey);
+   660→      const mapping = RM.normalize.buildFieldMapping(sourceKey, headers, {});
+   661→
+   662→      await RM.db.db.transaction('rw', table, RM.db.db.appSettings, RM.db.db.importMetadata, async () => {
+   663→        await RM.db.db.appSettings.put({ key: 'columnMapping', value: nextMapping });
+   664→
+   665→        const existing = await table.toArray();
+   666→        if (existing.length && existing.some((r) => r.raw)) {
+   667→          const fresh = existing.map((r) => {
+   668→            if (!r.raw) return r;
+   669→            const { record } = RM.normalize.normalizeRow(r.raw, sourceKey, mapping);
+   670→            return { ...record, id: r.id };
+   671→          });
+   672→          await table.clear();
+   673→          await table.bulkPut(fresh);
+   674→        }
+   675→
+   676→        const meta = await RM.db.getLatestImportMeta(sourceKey);
+   677→        if (meta) {
+   678→          await RM.db.db.importMetadata.update(meta.id, { mappingGaps: [] });
+   679→        }
+   680→      });
+   681→
+   682→      UI.toast('Mapping به پیش‌فرض بازگردانی شد.', 'success');
+   683→      await RM.refreshAll();
+   684→      await SettingsView.renderMappingPanel();
+   685→    } catch (err) {
+   686→      console.error('[ResetMapping]', err);
+   687→      UI.toast('خطا در بازگردانی Mapping.', 'error');
+   688→    }
+   689→  };
+   690→
+   691→  /* ================================================================
+   692→     ۶) رندر کل نما
+   693→     ================================================================ */
+   694→
+   695→  SettingsView.renderAll = async function () {
+   696→    await SettingsView.renderRules();
+   697→    await SettingsView.renderImportHistory();
+   698→    await SettingsView.renderMappingPanel();
+   699→
+   700→    // به‌روزرسانی دراپ‌داون فرم ستاپ با قوانین تازه (§90 — تغییر قانون → فرم تازه)
+   701→    if (RM.views.setup && typeof RM.views.setup.refreshStandardLengthOptions === 'function') {
+   702→      RM.views.setup.currentRules = await db.standardLengthRules.toArray();
+   703→      RM.views.setup.refreshStandardLengthOptions();
+   704→    }
+   705→  };
+   706→
+   707→  SettingsView.render = SettingsView.renderAll;
+   708→
+   709→  RM.views = RM.views || {};
+   710→  RM.views.settings = SettingsView;
+   711→})();
+   712→

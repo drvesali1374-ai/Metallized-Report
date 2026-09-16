@@ -1,0 +1,668 @@
+     1→/* =========================================================================
+     2→   setups.js — موتور مدیریت ستاپ‌ها (§20-§30، §89-§91)
+     3→   -------------------------------------------------------------------------
+     4→   مدل ستاپ:
+     5→     { id, setupNumber, machineNumber(1|2|3), width, thickness,
+     6→       standardLength, rollCount, cuttingPattern, createdAt, updatedAt }
+     7→
+     8→   قوانین حاکم:
+     9→     - کلید یکتا: عرض + شماره ستاپ + متراژ استاندارد + شماره دستگاه (§25)
+    10→     - ارث‌بری ضخامت: رکورد جدیدِ ستاپ موجود → ضخامت قفل (§22)
+    11→     - تغییر ضخامت در ویرایش → آبشار تراکنشی با تأیید کاربر (§23)
+    12→     - متراژ استاندارد فقط از قوانینِ همان ضخامت (§24)
+    13→     - دستگاه فقط ۱/۲/۳ — دستگاه متالایز (§21)
+    14→     - الگوی برش: مجموع ≤ عرض مادر (§27-§28)
+    15→   ========================================================================= */
+    16→
+    17→'use strict';
+    18→
+    19→(function () {
+    20→  const U = RM.utils;
+    21→  const R = RM.rulesEngine;
+    22→  const db = RM.db.db;
+    23→
+    24→  const Setups = {};
+    25→
+    26→  /* ---------------- الگوی برش (§27-§29) ---------------- */
+    27→
+    28→  /**
+    29→   * تجزیهٔ الگوی برش: "1100-1170" → [1100, 1170]
+    30→   * ارقام فارسی/لاتین پذیرفته می‌شوند (§95).
+    31→   * خروجی: { ok, parts, sum, message }
+    32→   */
+    33→  Setups.parsePattern = function (patternText) {
+    34→    const raw = String(patternText ?? '').trim();
+    35→    if (raw === '') return { ok: true, parts: [], sum: 0, message: '' };   // الگو اختیاری است
+    36→
+    37→    const tokens = raw.split('-');
+    38→    const parts = [];
+    39→
+    40→    for (const token of tokens) {
+    41→      const trimmed = token.trim();
+    42→      const num = U.parseNumber(trimmed);
+    43→      if (trimmed === '' || num === null || num <= 0) {
+    44→        return {
+    45→          ok: false, parts: [], sum: null,
+    46→          message: `بخش «${U.escapeHtml(U.truncate(trimmed || 'خالی', 12))}» در الگوی برش عدد معتبر و مثبت نیست.`,
+    47→        };
+    48→      }
+    49→      parts.push(Math.round(num * 100) / 100);   // حذف خطای اعشار شناور
+    50→    }
+    51→
+    52→    const sum = parts.reduce((a, b) => a + b, 0);
+    53→    return { ok: true, parts, sum, message: '' };
+    54→  };
+    55→
+    56→  /**
+    57→   * اعتبارسنجی الگو نسبت به عرض مادر (§28).
+    58→   * قانون: PatternSum <= MotherWidth (کمتر مجاز — پرت عرض).
+    59→   */
+    60→  Setups.validatePattern = function (patternText, motherWidth) {
+    61→    const parsed = Setups.parsePattern(patternText);
+    62→    if (!parsed.ok) return parsed;
+    63→    if (!parsed.parts.length) return { ok: true, parts: [], sum: 0, message: '' };
+    64→
+    65→    if (motherWidth === null || motherWidth === undefined || !(motherWidth > 0)) {
+    66→      return { ok: false, parts: parsed.parts, sum: parsed.sum, message: 'ابتدا عرض رول مادر را وارد کنید.' };
+    67→    }
+    68→
+    69→    if (parsed.sum > motherWidth) {
+    70→      return {
+    71→        ok: false, parts: parsed.parts, sum: parsed.sum,
+    72→        message: `مجموع عرض الگوی برش (${U.faWidth(parsed.sum)}) بیشتر از عرض رول مادر (${U.faWidth(motherWidth)}) است.`,
+    73→      };
+    74→    }
+    75→
+    76→    return { ok: true, parts: parsed.parts, sum: parsed.sum, message: '' };
+    77→  };
+    78→
+    79→  /* ---------------- نرمال‌سازی الگو برای کلید یکتا (ترتیب‌آگنوستیک) ---------------- */
+    80→
+    81→  /**
+    82→   * کلید نرمال‌شدهٔ الگوی برش — ترتیب قطعات در یکسان‌بودن الگوها بی‌اثر است
+    83→   * (مقایسه به‌صورت Multiset):
+    84→   *   "1200-1050" و "1050-1200" → "1050-1200"
+    85→   *   "800-930-930" ، "930-800-930" و "930-930-800" → "800-930-930"
+    86→   * الگوهای واقعاً متفاوت کلیدهای متفاوت می‌سازند.
+    87→   * الگوی خالی → "" (بدون الگو).
+    88→   */
+    89→  Setups.normalizePatternKey = function (patternText) {
+    90→    const parsed = Setups.parsePattern(patternText);
+    91→    if (!parsed.ok || !parsed.parts.length) return '';
+    92→    return [...parsed.parts].sort((a, b) => a - b).join('-');
+    93→  };
+    94→
+    95→  /* ---------------- ساخت کلید یکتا (§25 + الگوی برش) ---------------- */
+    96→
+    97→  /**
+    98→   * کلید یکتای ستاپ: عرض + شماره ستاپ + متراژ استاندارد + شماره دستگاه
+    99→   * + الگوی نرمال‌شدهٔ برش (ترتیب قطعات مهم نیست).
+   100→   */
+   101→  Setups.uniqueKey = function (setup) {
+   102→    const patternKey = Setups.normalizePatternKey(setup.cuttingPattern);
+   103→    return `${setup.width}-${setup.setupNumber}-${setup.standardLength}-${setup.machineNumber}-${patternKey}`;
+   104→  };
+   105→
+   106→  /* ---------------- اعتبارسنجی کامل فرم (§26) ---------------- */
+   107→
+   108→  /**
+   109→   * اعتبارسنجی کامل ورودی ستاپ (ایجاد و ویرایش).
+   110→   * @param {object} input        مقادیر خام فرم
+   111→   * @param {object} rules        قوانین متراژ موجود
+   112→   * @param {Array}  allSetups    تمام ستاپ‌های موجود
+   113→   * @param {number|null} editId  شناسهٔ رکورد در حال ویرایش (در بررسی یکتایی مستثنی)
+   114→   * @param {object}  options     { allowThicknessChange } — در ویرایش، تغییر ضخامت
+   115→   *                               با آبشار مجاز است (§23) و قفل ارث‌بری (§22) اعمال نمی‌شود
+   116→   * خروجی: { ok } یا { ok:false, errors:{field:msg}, message }
+   117→   */
+   118→  Setups.validate = function (input, rules, allSetups, editId = null, options = {}) {
+   119→    const errors = {};
+   120→
+   121→    /* --- شماره ستاپ: عدد صحیح نامنفی (§96) --- */
+   122→    const setupNumber = U.parseInt(input.setupNumber);
+   123→    if (setupNumber === null || setupNumber < 0) {
+   124→      errors.setupNumber = 'شماره ستاپ باید عدد صحیح و نامنفی باشد.';
+   125→    }
+   126→
+   127→    /* --- شماره دستگاه: فقط ۱/۲/۳ (§21) --- */
+   128→    const machineNumber = U.parseInt(input.machineNumber);
+   129→    if (!RM.config.VALID_MACHINES.includes(machineNumber)) {
+   130→      errors.machineNumber = 'شماره دستگاه باید ۱، ۲ یا ۳ باشد (دستگاه‌های متالایز).';
+   131→    }
+   132→
+   133→    /* --- عرض رول مادر: عدد مثبت --- */
+   134→    const width = U.parseNumber(input.width);
+   135→    if (width === null || width <= 0) {
+   136→      errors.width = 'عرض رول مادر باید عددی بزرگ‌تر از صفر باشد.';
+   137→    }
+   138→
+   139→    /* --- ضخامت + ارث‌بری (§22) --- */
+   140→    const thickness = U.parseNumber(input.thickness);
+   141→    if (thickness === null || thickness <= 0) {
+   142→      errors.thickness = 'ضخامت باید عددی مثبت (میکرون) باشد.';
+   143→    } else if (!options.allowThicknessChange) {
+   144→      // در ثبت جدید: ضخامت ستاپ موجود به ارث می‌رسد و قفل است (§22)
+   145→      const sameSetup = allSetups.filter(
+   146→        (s) => s.setupNumber === setupNumber && (editId === null || s.id !== editId)
+   147→      );
+   148→      if (sameSetup.length && sameSetup.some((s) => s.thickness !== null && s.thickness !== thickness)) {
+   149→        errors.thickness = `ضخامت ستاپ ${U.faNum(setupNumber)} قبلاً ${U.faNum(sameSetup[0].thickness)} تعیین شده و باید یکسان باشد (ارث‌بری ضخامت).`;
+   150→      }
+   151→    }
+   152→
+   153→    /* --- متراژ استاندارد: فقط از قوانین همان ضخامت (§24) --- */
+   154→    const standardLength = U.parseNumber(input.standardLength);
+   155→    if (standardLength === null) {
+   156→      errors.standardLength = 'متراژ استاندارد را انتخاب کنید.';
+   157→    } else if (thickness !== null && !R.standardLengthsFor(rules, thickness).includes(standardLength)) {
+   158→      const available = R.standardLengthsFor(rules, thickness);
+   159→      errors.standardLength = available.length
+   160→        ? 'متراژ استاندارد انتخابی در قوانین این ضخامت تعریف نشده است.'
+   161→        : 'برای این ضخامت هنوز قانون متراژی تعریف نشده — ابتدا در تنظیمات قانون تعریف کنید.';
+   162→    }
+   163→
+   164→    /* --- تعداد رول: عدد صحیح ≥ ۱ (§49) --- */
+   165→    const rollCount = U.parseInt(input.rollCount);
+   166→    if (rollCount === null || rollCount < 1) {
+   167→      errors.rollCount = 'تعداد رول باید عدد صحیح و حداقل ۱ باشد.';
+   168→    }
+   169→
+   170→    /* --- الگوی برش (§27-§28) --- */
+   171→    const patternResult = Setups.validatePattern(input.cuttingPattern, width);
+   172→    if (!patternResult.ok) {
+   173→      errors.cuttingPattern = patternResult.message;
+   174→    }
+   175→
+   176→    if (Object.keys(errors).length) {
+   177→      return { ok: false, errors, message: 'لطفاً خطاهای فرم را برطرف کنید.' };
+   178→    }
+   179→
+   180→    const record = {
+   181→      setupNumber,
+   182→      machineNumber,
+   183→      width,
+   184→      thickness,
+   185→      standardLength,
+   186→      rollCount,
+   187→      cuttingPattern: String(input.cuttingPattern ?? '').trim() || null,
+   188→    };
+   189→
+   190→    /* --- کلید یکتا (§25 + الگو) — الگو با ترتیب بی‌اثر --- */
+   191→    const duplicate = allSetups.find(
+   192→      (s) => (editId === null || s.id !== editId) && Setups.uniqueKey(s) === Setups.uniqueKey(record)
+   193→    );
+   194→    if (duplicate) {
+   195→      return {
+   196→        ok: false,
+   197→        errors: { machineNumber: 'ترکیب عرض + شماره ستاپ + متراژ استاندارد + دستگاه + الگوی برش تکراری است.' },
+   198→        message:
+   199→          `کلید «${U.faWidth(width)}-${U.faNum(setupNumber)}-${U.faNum(standardLength)}-${U.faNum(machineNumber)}-${U.escapeHtml(Setups.normalizePatternKey(record.cuttingPattern) || 'بدون الگو')}» ` +
+   200→          `قبلاً ثبت شده است (ترتیب قطعات الگو در یکتایی بی‌اثر است).`,
+   201→      };
+   202→    }
+   203→
+   204→    return { ok: true, record };
+   205→  };
+   206→
+   207→  /* ---------------- عملیات CRUD ---------------- */
+   208→
+   209→  /** ایجاد رکورد جدید — تراکنشی (§14) */
+   210→  Setups.create = async function (input) {
+   211→    const [rules, allSetups] = await Promise.all([
+   212→      db.standardLengthRules.toArray(),
+   213→      db.setupRolls.toArray(),
+   214→    ]);
+   215→
+   216→    const check = Setups.validate(input, rules, allSetups);
+   217→    if (!check.ok) return check;
+   218→
+   219→    const record = { ...check.record, createdAt: Date.now(), updatedAt: Date.now() };
+   220→    const id = await db.transaction('rw', db.setupRolls, async () => {
+   221→      return db.setupRolls.add(record);
+   222→    });
+   223→    return { ok: true, id };
+   224→  };
+   225→
+   226→  /**
+   227→   * ویرایش رکورد (§23، §26).
+   228→   * اگر ضخامت تغییر کند و رکوردهای دیگری با همین شماره ستاپ وجود داشته باشد،
+   229→   * کاربر باید تأیید کند (waterfall) — این تابع فقط پس از تأیید فراخوانی شود.
+   230→   * UI وظیفهٔ گرفتن تأیید و گزارش تعداد رکوردهای متأثر را دارد (cascadeInfo).
+   231→   */
+   232→  Setups.update = async function (id, input, options = {}) {
+   233→    const [rules, allSetups] = await Promise.all([
+   234→      db.standardLengthRules.toArray(),
+   235→      db.setupRolls.toArray(),
+   236→    ]);
+   237→
+   238→    const check = Setups.validate(input, rules, allSetups, id, { allowThicknessChange: true });
+   239→    if (!check.ok) return check;
+   240→
+   241→    const existing = allSetups.find((s) => s.id === id);
+   242→    if (!existing) return { ok: false, message: 'رکورد موردنظر یافت نشد.' };
+   243→
+   244→    const newRecord = { ...check.record, createdAt: existing.createdAt, updatedAt: Date.now() };
+   245→
+   246→    // حذف پرچم قدیمی پس از تکمیل ویرایش
+   247→    if ('legacy' in newRecord) delete newRecord.legacy;
+   248→
+   249→    await db.transaction('rw', db.setupRolls, async () => {
+   250→      await db.setupRolls.update(id, newRecord);
+   251→
+   252→      // آبشار ضخامت به سایر رکوردهای همان شماره ستاپ (§23) — تراکنشی
+   253→      const others = allSetups.filter((s) => s.id !== id && s.setupNumber === newRecord.setupNumber);
+   254→      for (const other of others) {
+   255→        if (other.thickness !== newRecord.thickness) {
+   256→          const patched = { ...other, thickness: newRecord.thickness, updatedAt: Date.now() };
+   257→          if ('legacy' in patched) delete patched.legacy;
+   258→          await db.setupRolls.update(other.id, patched);
+   259→        }
+   260→      }
+   261→    });
+   262→
+   263→    return { ok: true, id, cascaded: options.cascadedCount || 0 };
+   264→  };
+   265→
+   266→  /** اطلاعات آبشار تغییر ضخامت: چند رکورد دیگر تغییر می‌کنند؟ (برای پیام تأیید §23) */
+   267→  Setups.cascadeInfo = function (id, newThickness) {
+   268→    return db.transaction('r', db.setupRolls, async () => {
+   269→      const all = await db.setupRolls.toArray();
+   270→      const target = all.find((s) => s.id === id);
+   271→      if (!target) return { affected: 0, setupNumber: null };
+   272→
+   273→      const affected = all.filter(
+   274→        (s) => s.id !== id &&
+   275→              s.setupNumber === target.setupNumber &&
+   276→              s.thickness !== newThickness
+   277→      ).length;
+   278→      return { affected, setupNumber: target.setupNumber };
+   279→    });
+   280→  };
+   281→
+   282→  /** حذف رکورد (تأیید در UI — §70) */
+   283→  Setups.remove = async function (id) {
+   284→    await db.transaction('rw', db.setupRolls, async () => {
+   285→      await db.setupRolls.delete(id);
+   286→    });
+   287→  };
+   288→
+   289→  /** مجموع تعداد رول‌های همهٔ ستاپ‌ها (§57) */
+   290→  Setups.totalRollCount = function (setups) {
+   291→    return setups.reduce((sum, s) => sum + (s.rollCount || 0), 0);
+   292→  };
+   293→
+   294→  /* ================================================================
+   295→     ثبت گروهی از Clipboard — Bulk Paste (TSV)
+   296→     ----------------------------------------------------------------
+   297→     ساختار ورودی — هر «جفت خط» یک ست دست تولید می‌کند:
+   298→
+   299→       خط فرد (الگو):   عرض‌های الگو ... [سلول‌های خالی] ... تعداد رول
+   300→       خط زوج (مادر):   عرض رول‌های مادر — هر سلول غیرخالی، گروه جدید
+   301→                        شروع می‌کند؛ سلول خالی یعنی ادامهٔ مادر قبلی.
+   302→                        هر قطعهٔ الگو به مادر متناظر خودش متصل می‌شود.
+   303→
+   304→     الگوها می‌توانند یک‌تکه، دو‌تکه یا چندتکه باشند.
+   305→
+   306→     جریان (قابل ویرایش پس از تحلیل):
+   307→       ۱) buildBulkDraft    — تجزیهٔ متن + تجمیع هم‌کلیدها → پیش‌نویس رکوردها
+   308→       ۲) پیش‌نمایش UI      — کاربر فیلدهای سراسری (شماره ستاپ/ضخامت) و
+   309→                              فیلدهای هر رکورد (دستگاه/متراژ استاندارد/
+   310→                              عرض مادر/الگو/تعداد) را ویرایش می‌کند
+   311→       ۳) validateBulkDraft — اعتبارسنجی با همان منطق ثبت دستی (§26)
+   312→       ۴) commitBulkDraft   — ثبت همهٔ رکوردها در یک تراکنش واحد
+   313→     ================================================================ */
+   314→
+   315→  /**
+   316→   * تجزیهٔ متن Paste شده به رکوردهای ساختاری (بدون اعتبارسنجی منطقی).
+   317→   * خروجی: { pairs, structureErrors }
+   318→   *   pairs: [{ pairIndex, lineNos, rollCountToken, rollCount, groups: [{ motherToken, parts: [token] }] }]
+   319→   */
+   320→  Setups.parseBulkText = function (text) {
+   321→    const rawLines = String(text ?? '').replace(/\r/g, '').split('\n');
+   322→    const cells = rawLines.map((l) => l.split('\t'));
+   323→
+   324→    // اندیس خطوط دارای محتوا (خط کاملاً خالی نادیده گرفته می‌شود)
+   325→    const contentIdx = [];
+   326→    cells.forEach((row, i) => {
+   327→      if (row.some((c) => String(c).trim() !== '')) contentIdx.push(i);
+   328→    });
+   329→
+   330→    const pairs = [];
+   331→    const structureErrors = [];
+   332→
+   333→    for (let p = 0; p < contentIdx.length; p += 2) {
+   334→      const patternLine = contentIdx[p];
+   335→      const motherLine = contentIdx[p + 1];          // undefined → خط مادر غایب
+   336→      const patternCells = cells[patternLine];
+   337→      const motherCells = motherLine !== undefined ? cells[motherLine] : [];
+   338→      const pairIndex = pairs.length + 1;
+   339→
+   340→      // --- آخرین سلول غیرخالیِ خط الگو = تعداد رول ---
+   341→      let countIdx = -1;
+   342→      for (let i = patternCells.length - 1; i >= 0; i--) {
+   343→        if (String(patternCells[i] ?? '').trim() !== '') { countIdx = i; break; }
+   344→      }
+   345→      if (countIdx <= 0) {
+   346→        structureErrors.push({ pairIndex, message: `جفت ${U.faNum(pairIndex)}: خط الگو ساختار معتبری ندارد (عرض الگو یا تعداد رول یافت نشد).` });
+   347→        continue;
+   348→      }
+   349→
+   350→      const rollCountToken = String(patternCells[countIdx]).trim();
+   351→
+   352→      // --- سلول‌های مادر غیرخالی (فقط تا اندیس تعداد) — شروع گروه ---
+   353→      const motherStarts = new Map();   // اندیس ستون → توکن عرض مادر
+   354→      const limit = Math.min(motherCells.length, countIdx);
+   355→      for (let i = 0; i < limit; i++) {
+   356→        const t = String(motherCells[i] ?? '').trim();
+   357→        if (t !== '') motherStarts.set(i, t);
+   358→      }
+   359→
+   360→      // --- گروه‌بندی قطعات الگو زیر مادر متناظر ---
+   361→      const groups = [];
+   362→      let current = null;
+   363→      let orphanParts = 0;
+   364→
+   365→      for (let i = 0; i < countIdx; i++) {
+   366→        const t = String(patternCells[i] ?? '').trim();
+   367→        if (t === '') continue;
+   368→
+   369→        if (motherStarts.has(i)) {
+   370→          current = { motherToken: motherStarts.get(i), parts: [] };
+   371→          groups.push(current);
+   372→        }
+   373→        if (current === null) {
+   374→          orphanParts++;
+   375→          continue;
+   376→        }
+   377→        current.parts.push(t);
+   378→      }
+   379→
+   380→      /* --- نسخهٔ ۲٫۴: بدون ادغام گروه‌های یکسان — همهٔ عرض‌ها حتی تکراری
+   381→             به‌صورت رکورد جداگانه نمایش داده می‌شوند تا کاربر بتواند هر
+   382→             نسخه را به دستگاه/متراژ متفاوت تخصیص دهد (ادغام باعث از دست
+   383→             رفتن این امکان بود). تکراری‌بودنِ نهایی در اعتبارسنجی (§26)
+   384→             با کلید یکتا بررسی و رد می‌شود. --- */
+   385→      for (const g of groups) {
+   386→        if (g.occurrences == null) g.occurrences = 1;
+   387→      }
+   388→      const mergedGroups = groups;
+   389→
+   390→      if (motherLine === undefined) {
+   391→        structureErrors.push({
+   392→          pairIndex,
+   393→          message: `جفت ${U.faNum(pairIndex)}: خط رول مادر متناظر برای خط الگو وجود ندارد.`,
+   394→        });
+   395→      }
+   396→      if (orphanParts > 0) {
+   397→        structureErrors.push({
+   398→          pairIndex,
+   399→          message: `جفت ${U.faNum(pairIndex)}: ${U.faNum(orphanParts)} قطعهٔ الگو در ابتدای خط مادر قرار ندارند و رول مادر متناظری ندارند.`,
+   400→        });
+   401→      }
+   402→
+   403→      pairs.push({
+   404→        pairIndex,
+   405→        lineNos: { pattern: patternLine + 1, mother: motherLine !== undefined ? motherLine + 1 : null },
+   406→        rollCountToken,
+   407→        rollCount: U.parseInt(rollCountToken),
+   408→        /* همهٔ سلول‌های غیرخالی ردیف مادر (تا ستون تعداد) — مبنای مرجع
+   409→           «تعداد مجاز»: هر سلول = یک تکرار عرض در آن ردیف، حتی اگر سلول
+   410→           الگوی متناظرش خالی باشد و رکوردی نسازد (کنترل باید آن را گزارش کند). */
+   411→        motherCells: [...motherStarts.values()],
+   412→        groups: mergedGroups,
+   413→      });
+   414→    }
+   415→
+   416→    return { pairs, structureErrors };
+   417→  };
+   418→
+   419→  /** فیلدهای سراسری Batch — خطاهایشان یک‌بار در سطح Batch گزارش می‌شوند */
+   420→  Setups.BULK_GLOBAL_FIELDS = ['setupNumber', 'thickness'];
+   421→
+   422→  /**
+   423→   * ساخت پیش‌نویس رکوردهای Bulk از متن Paste‌شده (بدون اعتبارسنجی منطقی).
+   424→   *
+   425→   * نسخهٔ ۲٫۴ — بدون تجمیع: هر گروه (مادر + الگو) در هر خط Paste، حتی با
+   426→   * عرض/الگوی مشابه، یک رکورد جداگانهٔ پیش‌نمایش می‌سازد؛ بنابراین کاربر
+   427→   * می‌تواند عرض تکراری ردیف ۱ را به دستگاه ۲ و عرض تکراری ردیف ۳ را به
+   428→   * دستگاه ۱ تخصیص دهد یا متراژ استاندارد متفاوت انتخاب کند. اگر در پایان
+   429→   * (عرض مادر + شماره ستاپ + متراژ استاندارد + دستگاه + الگوی برش نرمال)
+   430→   * تکراری بود، اعتبارسنجی (§26) ردیف را خطا می‌دهد و ثبت انجام نمی‌شود.
+   431→   *
+   432→   * commonInit: مقادیر اولیهٔ دستگاه/متراژ استاندارد ردیف‌ها (از فرم دستی).
+   433→   * خروجی: { drafts, structureErrors, allowedMap }
+   434→   *   drafts: [{ motherToken, patternText, rollCount, occurrences, pairs,
+   435→   *              machineNumber, standardLength }]
+   436→   *
+   437→   * allowedMap (کنترل «تعداد مجاز» — تغییر جدید):
+   438→   *   مرجعِ مقایسهٔ عرض‌های مادر دیتای پیست‌شده. برای هر عرض یکتای مادر:
+   439→   *     تعداد مجاز (دیتای پیست‌شده) = عرض × تعداد تکرار عرض در ردیف مادر
+   440→   *                                      × عدد انتهایی ردیف الگوی بالایی
+   441→   *   مقدار ذخیره‌شده در نقشه فقط Σ(تکرار × عدد انتهایی) است (بدون ضرب عرض)
+   442→   *   و عرض در لحظهٔ مقایسه/نمایش ضرب می‌شود (طبق تعریف کاربر:
+   443→   *   مثلاً 1180 → 1180×8 + 1180×2 = 11800).
+   444→   */
+   445→  Setups.buildBulkDraft = function (commonInit, bulkText) {
+   446→    const parsed = Setups.parseBulkText(bulkText);
+   447→    const initMachine = String(commonInit.machineNumber ?? '');
+   448→    const initStandard = String(commonInit.standardLength ?? '');
+   449→
+   450→    const drafts = [];
+   451→    const allowedMap = {};    // "عرض(کلید عددی)" → Σ (تکرار × عدد انتهایی ردیف الگو)
+   452→    for (const pair of parsed.pairs) {
+   453→      const multiplier = pair.rollCount === null ? 0 : pair.rollCount;
+   454→      for (const group of pair.groups) {
+   455→        drafts.push({
+   456→          motherToken: group.motherToken,
+   457→          patternText: group.parts.join('-'),
+   458→          rollCount: pair.rollCount,
+   459→          occurrences: group.occurrences || 1,
+   460→          pairs: [pair.pairIndex],
+   461→          machineNumber: initMachine,      // قابل ویرایش در هر رکورد
+   462→          standardLength: initStandard,    // قابل ویرایش در هر رکورد
+   463→        });
+   464→      }
+   465→
+   466→      /* --- مرجع تعداد مجاز عرض‌های مادر (دیتای پیست‌شده) —
+   467→           «همهٔ سلول‌های ردیف مادر» شمرده می‌شوند (هر سلول = یک تکرار
+   468→           عرض در همان ردیف × عدد انتهایی ردیف الگوی بالایی)، حتی اگر
+   469→           سلول الگوی متناظر خالی باشد و رکوردی نسازد — در آن صورت
+   470→           پیش‌نمایش آن عرض را ندارد و کنترل خطای «کمتر» می‌دهد. --- */
+   471→      for (const token of (pair.motherCells || [])) {
+   472→        const w = U.parseNumber(token);
+   473→        if (w !== null && w > 0) {
+   474→          const key = String(Math.round(w * 100) / 100);
+   475→          allowedMap[key] = (allowedMap[key] || 0) + multiplier;
+   476→        }
+   477→      }
+   478→    }
+   479→
+   480→    return { drafts, structureErrors: parsed.structureErrors, allowedMap };
+   481→  };
+   482→
+   483→  /**
+   484→   * اعتبارسنجی پیش‌نویس Bulk — دقیقاً همان منطق ثبت دستی (§26).
+   485→   * @param {object} common   { setupNumber, thickness } — سراسری برای کل Batch
+   486→   * @param {Array}  drafts   پیش‌نویس‌های (احتمالاً ویرایش‌شدهٔ) رکوردها
+   487→   * @param {object} options  { allowedMap } — مرجع «تعداد مجاز» عرض‌های مادر
+   488→   *                          دیتای پیست‌شده (از buildBulkDraft — اختیاری)
+   489→   * خروجی: { ok, globalErrors, records, total, allowedRows }
+   490→   *   globalErrors: خطاهای فیلدهای سراسری (یک‌بار)
+   491→   *   records[i]:   { ...draft, errors: [msgs], record? } — record وقتی معتبر
+   492→   *   allowedRows: ردیف‌های کنترل «تعداد مجاز» هر عرض یکتای مادر:
+   493→   *     { width, key, pastedCount, previewCount, pasted, preview, status }
+   494→   *     status ∈ 'ok' | 'less' | 'more' — عرض × (تعداد × ست) دو طرف باید برابر باشد.
+   495→   */
+   496→  Setups.validateBulkDraft = async function (common, drafts, options = {}) {
+   497→    const [rules, allSetups] = await Promise.all([
+   498→      db.standardLengthRules.toArray(),
+   499→      db.setupRolls.toArray(),
+   500→    ]);
+   501→
+   502→    const working = [...allSetups];
+   503→    const globalErrors = {};
+   504→    const records = [];
+   505→
+   506→    // کلیدهای موجود در DB و کلیدهای قبول‌شدهٔ همین Batch — برای پیغام خطای
+   507→    // دقیقِ «تکراری» (نسخهٔ ۲٫۴): تکراریِ داخل Batch یا تکراری با رکورد ثبت‌شده
+   508→    const dbKeys = new Set(allSetups.map((s) => Setups.uniqueKey(s)));
+   509→    const batchKeys = new Set();
+   510→
+   511→    // ضخامت معتبر اما بدون قانون متراژ → خطای سراسری (نه تکرار در همهٔ ردیف‌ها)
+   512→    const commonThickness = U.parseNumber(common.thickness);
+   513→    if (commonThickness !== null && !R.standardLengthsFor(rules, commonThickness).length) {
+   514→      globalErrors.thickness = 'برای این ضخامت قانون متراژی تعریف نشده — ابتدا در تنظیمات قانون اضافه کنید.';
+   515→    }
+   516→
+   517→    for (const draft of drafts) {
+   518→      const input = {
+   519→        setupNumber: common.setupNumber,
+   520→        machineNumber: draft.machineNumber,
+   521→        thickness: common.thickness,
+   522→        standardLength: draft.standardLength,
+   523→        width: draft.motherToken,
+   524→        rollCount: draft.rollCount === null ? '' : String(draft.rollCount),
+   525→        cuttingPattern: draft.patternText,
+   526→      };
+   527→
+   528→      // کلید یکتای این ردیف (نمایشی — ترتیب قطعات الگو بی‌اثر)
+   529→      const rowKey = Setups.uniqueKey({
+   530→        width: U.parseNumber(draft.motherToken),
+   531→        setupNumber: U.parseInt(common.setupNumber),
+   532→        standardLength: U.parseNumber(draft.standardLength),
+   533→        machineNumber: U.parseInt(draft.machineNumber),
+   534→        cuttingPattern: draft.patternText,
+   535→      });
+   536→
+   537→      const check = Setups.validate(input, rules, working);
+   538→      const row = { ...draft, errors: [] };
+   539→
+   540→      if (check.ok) {
+   541→        working.push(check.record);
+   542→        batchKeys.add(rowKey);
+   543→        row.record = check.record;
+   544→      } else {
+   545→        const isDuplicate = /تکراری/.test(String(check.errors.machineNumber || ''));
+   546→        for (const [field, msg] of Object.entries(check.errors)) {
+   547→          if (Setups.BULK_GLOBAL_FIELDS.includes(field)) {
+   548→            if (!globalErrors[field]) globalErrors[field] = msg;   // یک‌بار در سطح Batch
+   549→          } else if (field === 'standardLength' && globalErrors.thickness) {
+   550→            // ریشهٔ خطای متراژ، ضخامت نامعتبر سراسری است — همان گزارش می‌شود
+   551→            continue;
+   552→          } else if (isDuplicate && field === 'machineNumber') {
+   553→            // پیغام دقیق تکراری (نسخهٔ ۲٫۴): تفکیک تکراریِ داخل Batch از ثبت‌شده
+   554→            row.errors.push(
+   555→              (batchKeys.has(rowKey) || dbKeys.has(rowKey))
+   556→                ? `ترکیب تکراری — «عرض مادر ${U.faWidth(U.parseNumber(draft.motherToken) ?? '?')} + شماره ستاپ ${U.faNum(U.parseInt(common.setupNumber) ?? '?')} + متراژ استاندارد ${U.faNum(U.parseNumber(draft.standardLength) ?? '?')} + دستگاه ${U.faNum(U.parseInt(draft.machineNumber) ?? '?')} + الگوی برش ${U.escapeHtml(Setups.normalizePatternKey(draft.patternText) || 'بدون الگو')}» ${dbKeys.has(rowKey) && !batchKeys.has(rowKey) ? 'قبلاً در پایگاه‌داده ثبت شده است' : 'در همین Batch تکراری است'} (ترتیب قطعات الگو بی‌اثر). ثبت مجدد مجاز نیست — دستگاه، متراژ استاندارد یا الگو را تغییر دهید.`
+   557→                : msg
+   558→            );
+   559→          } else {
+   560→            row.errors.push(msg);
+   561→          }
+   562→        }
+   563→      }
+   564→      records.push(row);
+   565→    }
+   566→
+   567→    /* --- کنترل «تعداد مجاز» عرض‌های مادر (تغییر جدید — ۱) -------------------
+   568→       مرجع: دیتای پیست‌شده (allowedMap از buildBulkDraft)؛
+   569→       پیش‌نمایش: Σ (تعداد ست × تعداد رول) روی رکوردهای همان عرض.
+   570→       تعداد ست هر رکورد = متراژ استاندارد ÷ کوچکترین استاندارد ضخامت
+   571→       (موتور قوانین — رکورد بدون متراژ ۰ حساب می‌شود).
+   572→       دو مقدار باید برای هر عرض یکتا «برابر» باشد؛ در غیر این صورت خطا:
+   573→         پیش‌نمایش < پیست‌شده → «تعداد کمتر از دیتای ستاپ است»
+   574→         پیش‌نمایش > پیست‌شده → «تعداد رول‌های آن عرض بیشتر از دیتای ستاپ است»
+   575→       خطا روی «همهٔ» رکوردهای همان عرض نمایش داده می‌شود (عرض‌های تکراری).
+   576→       -------------------------------------------------------------------- */
+   577→    let allowedRows = null;
+   578→    const allowedMap = options.allowedMap || null;
+   579→    if (allowedMap && Object.keys(allowedMap).length) {
+   580→      const commonThickness = U.parseNumber(common.thickness);
+   581→
+   582→      /* ۱) مجموع «تعداد × ست» رکوردهای پیش‌نمایش به تفکیک عرض مادر */
+   583→      const previewSums = new Map();   // کلید عددی → { width, sum }
+   584→      for (const row of records) {
+   585→        const w = U.parseNumber(row.motherToken);
+   586→        if (w === null || !(w > 0)) continue;
+   587→        const key = String(Math.round(w * 100) / 100);
+   588→        if (!previewSums.has(key)) previewSums.set(key, { width: w, sum: 0 });
+   589→
+   590→        const std = U.parseNumber(row.standardLength);
+   591→        const sc = R.setCount(rules, commonThickness, std);
+   592→        const setCount = sc !== null && sc > 0 ? sc : 0;
+   593→        const count = row.rollCount === null ? 0 : (Number(row.rollCount) || 0);
+   594→        previewSums.get(key).sum += setCount * count;
+   595→      }
+   596→
+   597→      /* ۲) ساخت ردیف‌های کنترل برای اجتماع عرض‌های دو طرف */
+   598→      const keys = new Set([...Object.keys(allowedMap), ...previewSums.keys()]);
+   599→      allowedRows = [];
+   600→      for (const key of keys) {
+   601→        const pastedCount = Number(allowedMap[key]) || 0;
+   602→        const pv = previewSums.get(key) || { width: Number(key), sum: 0 };
+   603→        allowedRows.push({
+   604→          key,
+   605→          width: pv.width,
+   606→          pastedCount,                                   // Σ (تکرار × عدد انتهایی)
+   607→          previewCount: pv.sum,                          // Σ (ست × تعداد)
+   608→          pasted: pastedCount * pv.width,                // «تعداد مجاز» کامل (× عرض)
+   609→          preview: pv.sum * pv.width,
+   610→          status: pv.sum === pastedCount ? 'ok' : (pv.sum < pastedCount ? 'less' : 'more'),
+   611→        });
+   612→      }
+   613→      allowedRows.sort((a, b) => a.width - b.width);
+   614→
+   615→      /* ۳) الصاق خطا به همهٔ رکوردهای عرض‌های ناموفق */
+   616→      const failed = new Map(
+   617→        allowedRows.filter((r) => r.status !== 'ok').map((r) => [r.key, r])
+   618→      );
+   619→      if (failed.size) {
+   620→        for (const row of records) {
+   621→          const w = U.parseNumber(row.motherToken);
+   622→          if (w === null || !(w > 0)) continue;
+   623→          const info = failed.get(String(Math.round(w * 100) / 100));
+   624→          if (!info) continue;
+   625→          row.errors.push(
+   626→            info.status === 'less'
+   627→              ? `کنترل تعداد مجاز عرض ${U.faWidth(info.width)} — «تعداد مجاز» پیش‌نمایش ${U.faNum(info.preview)} کمتر از دیتای پیست‌شده ${U.faNum(info.pasted)} است — تعداد کمتر از دیتای ستاپ است.`
+   628→              : `کنترل تعداد مجاز عرض ${U.faWidth(info.width)} — «تعداد مجاز» پیش‌نمایش ${U.faNum(info.preview)} بیشتر از دیتای پیست‌شده ${U.faNum(info.pasted)} است — تعداد رول‌های آن عرض بیشتر از دیتای ستاپ است.`
+   629→          );
+   630→        }
+   631→        if (!globalErrors.allowed) {
+   632→          globalErrors.allowed =
+   633→            `کنترل «تعداد مجاز» برای ${U.faNum(failed.size)} عرض مادر پاس نشد — جزئیات در پنل «کنترل تعداد مجاز» و وضعیت ردیف‌ها.`;
+   634→        }
+   635→      }
+   636→    }
+   637→
+   638→    const ok =
+   639→      records.length > 0 &&
+   640→      Object.keys(globalErrors).length === 0 &&
+   641→      records.every((r) => !r.errors.length && r.record);
+   642→
+   643→    return { ok, globalErrors, records, total: records.length, allowedRows };
+   644→  };
+   645→
+   646→  /**
+   647→   * Commit پیش‌نویس — همه یا هیچ: اگر حتی یک رکورد خطا داشته باشد
+   648→   * هیچ رکوردی ثبت نمی‌شود؛ در غیر این صورت همه در یک تراکنش واحد
+   649→   * ذخیره می‌شوند (بدون Batch نیمه‌کاره). options.allowedMap نیز مثل
+   650→   * validateBulkDraft به کنترل «تعداد مجاز» پاس داده می‌شود (تغییر جدید — ۱).
+   651→   */
+   652→  Setups.commitBulkDraft = async function (common, drafts, options = {}) {
+   653→    const check = await Setups.validateBulkDraft(common, drafts, options);
+   654→    if (!check.ok) return check;
+   655→
+   656→    const now = Date.now();
+   657→    const ids = await db.transaction('rw', db.setupRolls, async () => {
+   658→      return db.setupRolls.bulkAdd(
+   659→        check.records.map((r) => ({ ...r.record, createdAt: now, updatedAt: now }))
+   660→      );
+   661→    });
+   662→
+   663→    return { ok: true, ids, count: check.records.length, records: check.records };
+   664→  };
+   665→
+   666→  RM.setupEngine = Setups;
+   667→})();
+   668→

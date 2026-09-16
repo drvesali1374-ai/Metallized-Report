@@ -1,0 +1,1508 @@
+     1→/* =========================================================================
+     2→   views/setup.js — نما ستاپ‌ها (§20-§30، §46-§51، §85-§87، §91)
+     3→   -------------------------------------------------------------------------
+     4→   فرم ثبت/ویرایش با:
+     5→     - ارث‌بری ضخامت (قفل خودکار §22)
+     6→     - دراپ‌داون متراژ استاندارد وابسته به ضخامت (§24)
+     7→     - اعتبارسنجی زندهٔ الگوی برش (§29)
+     8→   جدول گزارش هر ستاپ:
+     9→     خام موجود + متالایز + برش‌نشده + مغایرت ظرفیت (§46-§50، §86)
+    10→     + جزئیات Audit تخصیص (§45)
+    11→   ========================================================================= */
+    12→
+    13→'use strict';
+    14→
+    15→(function () {
+    16→  const U = RM.utils;
+    17→  const UI = RM.ui;
+    18→  const Setups = RM.setupEngine;
+    19→  const db = RM.db.db;
+    20→
+    21→  const SetupView = {
+    22→    editingId: null,          // شناسهٔ رکورد در حال ویرایش (null = ثبت جدید)
+    23→    currentRules: [],
+    24→    thicknessLocked: false,   // ارث‌بری فعال؟ (§22)
+    25→    sortPipeline: null,       // [{field, direction}] — پنل مرتب‌سازی گزارش (ماندگار)
+    26→    sortPanelVisible: true,   // نمایش/مخفی پنل مرتب‌سازی (ماندگار — نسخهٔ ۲٫۳)
+    27→    colsPanelVisible: true,   // نمایش/مخفی پنل ترتیب ستون‌ها (ماندگار — نسخهٔ ۲٫۳)
+    28→    columnOrder: null,        // ترتیب ستون‌های گزارش (ماندگار — نسخهٔ ۲٫۳)
+    29→    columnWidths: null,       // { colKey: px } — عرض ستون‌ها (ماندگار — نسخهٔ ۲٫۴)
+    30→    visibleRows: null,        // تعداد ردیف قابل نمایش (ماندگار — نسخهٔ ۲٫۴)
+    31→    filters: {},              // { fieldKey: {value, invert} } — فیلتر زیر سرستون‌ها
+    32→  };
+    33→
+    34→  /* ---------------- عناصر فرم ---------------- */
+    35→
+    36→  const F = () => ({
+    37→    setupNumber: document.getElementById('f-setup'),
+    38→    machineNumber: document.getElementById('f-machine'),
+    39→    width: document.getElementById('f-width'),
+    40→    thickness: document.getElementById('f-thickness'),
+    41→    standardLength: document.getElementById('f-standard'),
+    42→    rollCount: document.getElementById('f-count'),
+    43→    cuttingPattern: document.getElementById('f-pattern'),
+    44→  });
+    45→
+    46→  /* ================================================================
+    47→     ۱) راه‌انداری
+    48→     ================================================================ */
+    49→
+    50→  SetupView.init = async function () {
+    51→    const form = document.getElementById('setup-form');
+    52→
+    53→    /* --- ارث‌بری ضخامت: پس از ورود شماره ستاپ بررسی می‌شود (§22) --- */
+    54→    F().setupNumber.addEventListener('change', () => SetupView.applyThicknessInheritance());
+    55→    F().setupNumber.addEventListener('blur', () => SetupView.applyThicknessInheritance());
+    56→
+    57→    /* --- بازپر شدن دراپ‌داون متراژ استاندارد بر اساس ضخامت (§24) ---
+    58→       اگر مقدار فعلی در قوانین ضخامت جدید هم معتبر باشد، حفظ می‌شود */
+    59→    F().thickness.addEventListener('input', () => {
+    60→      if (SetupView.thicknessLocked) return;
+    61→      SetupView.refreshStandardLengthOptions(F().standardLength.value);
+    62→    });
+    63→
+    64→    /* --- اعتبارسنجی زندهٔ الگوی برش (§29) --- */
+    65→    F().cuttingPattern.addEventListener('input', () => SetupView.updatePatternFeedback());
+    66→
+    67→    /* --- اعتبارسنجی زندهٔ عرض (الگو به عرض وابسته است) --- */
+    68→    F().width.addEventListener('input', () => SetupView.updatePatternFeedback());
+    69→
+    70→    /* --- ثبت / ویرایش --- */
+    71→    form.addEventListener('submit', (e) => {
+    72→      e.preventDefault();
+    73→      SetupView.submit();
+    74→    });
+    75→
+    76→    /* --- پاک‌کردن فرم / انصراف از ویرایش --- */
+    77→    document.getElementById('btn-reset-form').addEventListener('click', () => SetupView.resetForm());
+    78→    document.getElementById('btn-cancel-edit').addEventListener('click', () => SetupView.resetForm());
+    79→
+    80→    /* --- حذف همه (§70 تأیید) --- */
+    81→    document.getElementById('btn-clear-setups').addEventListener('click', SetupView.clearAll);
+    82→
+    83→    /* --- ثبت گروهی (Bulk Paste) --- */
+    84→    document.getElementById('btn-bulk-analyze').addEventListener('click', () => SetupView.analyzeBulk());
+    85→    document.getElementById('btn-bulk-commit').addEventListener('click', () => SetupView.commitBulk());
+    86→    document.getElementById('btn-bulk-clear').addEventListener('click', () => SetupView.resetBulk());
+    87→
+    88→    /* --- پنل مرتب‌سازی گزارش ستاپ‌ها (ماندگار — مثل رول‌های خام §38) --- */
+    89→    SetupView.sortPipeline = await RM.db.getSetting('setupReportSort', RM.config.SETUP_DEFAULT_SORT);
+    90→    SetupView.initSortPanel();
+    91→
+    92→    /* --- پنل‌های قابل مخفی/ظاهر + ترتیب ستون‌ها (نسخهٔ ۲٫۳) --- */
+    93→    SetupView.sortPanelVisible = await RM.db.getSetting('setupSortPanelVisible', true);
+    94→    SetupView.colsPanelVisible = await RM.db.getSetting('setupColsPanelVisible', true);
+    95→    SetupView.columnOrder = await RM.db.getSetting(
+    96→      'setupColumnOrder', RM.config.SETUP_DEFAULT_COLUMN_ORDER);
+    97→
+    98→    /* --- مهاجرت نرم ترتیب ستون‌ها: کلیدهای جدید (مثل setCount — تغییر ۱)
+    99→           که در ترتیب ذخیره‌شدهٔ نسخ‌های قبلی نیستند، در جایگاه منطقی‌شان
+   100→           (بعد از ستونِ قبل از خود در ترتیب پیش‌فرض) درج می‌شوند تا ستون
+   101→           جدید همان‌جا دیده شود که کاربر انتظار دارد. --- */
+   102→    if (Array.isArray(SetupView.columnOrder)) {
+   103→      const defaults = RM.config.SETUP_DEFAULT_COLUMN_ORDER;
+   104→      const missing = defaults.filter((k) => !SetupView.columnOrder.includes(k));
+   105→      for (const key of missing) {
+   106→        const prevIndex = defaults.indexOf(key) - 1;
+   107→        const anchor = prevIndex >= 0 ? defaults[prevIndex] : null;
+   108→        const at = anchor !== null ? SetupView.columnOrder.indexOf(anchor) : -1;
+   109→        if (at !== -1) SetupView.columnOrder.splice(at + 1, 0, key);
+   110→        else SetupView.columnOrder.push(key);
+   111→      }
+   112→      if (missing.length) {
+   113→        await RM.db.setSetting('setupColumnOrder', SetupView.columnOrder);
+   114→      }
+   115→    }
+   116→
+   117→    /* --- عرض ستون‌ها + تعداد ردیف قابل نمایش (ماندگار — نسخهٔ ۲٫۴) --- */
+   118→    SetupView.columnWidths = Object.assign(
+   119→      {}, RM.config.SETUP_DEFAULT_COLUMN_WIDTHS,
+   120→      await RM.db.getSetting('setupColumnWidths', {}) || {}
+   121→    );
+   122→    SetupView.visibleRows = await RM.db.getSetting(
+   123→      'setupVisibleRows', RM.config.SETUP_VISIBLE_ROWS);
+   124→
+   125→    const sortToggle = document.getElementById('setup-sort-toggle');
+   126→    if (sortToggle) {
+   127→      sortToggle.addEventListener('click', () => {
+   128→        SetupView.sortPanelVisible = !SetupView.sortPanelVisible;
+   129→        RM.db.setSetting('setupSortPanelVisible', SetupView.sortPanelVisible);
+   130→        SetupView.applyPanelVisibility();
+   131→      });
+   132→    }
+   133→
+   134→    const colsToggle = document.getElementById('setup-cols-toggle');
+   135→    if (colsToggle) {
+   136→      colsToggle.addEventListener('click', () => {
+   137→        SetupView.colsPanelVisible = !SetupView.colsPanelVisible;
+   138→        RM.db.setSetting('setupColsPanelVisible', SetupView.colsPanelVisible);
+   139→        SetupView.applyPanelVisibility();
+   140→      });
+   141→    }
+   142→
+   143→    document.getElementById('setup-cols-reset-btn').addEventListener('click', async () => {
+   144→      SetupView.columnOrder = [...RM.config.SETUP_DEFAULT_COLUMN_ORDER];
+   145→      SetupView.columnWidths = { ...RM.config.SETUP_DEFAULT_COLUMN_WIDTHS };
+   146→      await RM.db.setSetting('setupColumnOrder', SetupView.columnOrder);
+   147→      await RM.db.setSetting('setupColumnWidths', SetupView.columnWidths);
+   148→      SetupView.renderColumnOrderPanel();
+   149→      SetupView.renderReportTable();
+   150→      UI.toast('ترتیب و عرض ستون‌ها به حالت پیش‌فرض بازگشت.', 'info');
+   151→    });
+   152→
+   153→    SetupView.applyPanelVisibility();
+   154→  };
+   155→
+   156→  /* ================================================================
+   157→     ۲) منطق فرم
+   158→     ================================================================ */
+   159→
+   160→  /** ارث‌بری ضخامت (§22): اگر ستاپ موجود باشد → قفل خودکار */
+   161→  SetupView.applyThicknessInheritance = async function () {
+   162→    const { setupNumber, thickness, standardLength } = F();
+   163→    const value = U.parseInt(setupNumber.value);
+   164→    const hintEl = document.getElementById('hint-thickness');
+   165→
+   166→    if (SetupView.editingId !== null) return;   // در ویرایش، ضخامت آزاد است (§23)
+   167→
+   168→    if (value === null || value < 0) {
+   169→      SetupView.thicknessLocked = false;
+   170→      thickness.disabled = false;
+   171→      hintEl.hidden = true;
+   172→      return;
+   173→    }
+   174→
+   175→    const existing = await db.setupRolls.where('setupNumber').equals(value).toArray();
+   176→    const withThickness = existing.find((s) => s.thickness !== null);
+   177→
+   178→    if (withThickness) {
+   179→      // ارث‌بری: ضخامت تعیین‌شدهٔ اولین رکورد همان ستاپ (§22)
+   180→      SetupView.thicknessLocked = true;
+   181→      thickness.value = String(withThickness.thickness);
+   182→      thickness.disabled = true;
+   183→      hintEl.textContent = `ضخامت ستاپ ${U.faNum(value)} قبلاً ${U.faNum(withThickness.thickness)} تعیین شده و به‌صورت خودکار به ارث رسید (§ ارث‌بری ضخامت).`;
+   184→      hintEl.hidden = false;
+   185→    } else {
+   186→      SetupView.thicknessLocked = false;
+   187→      thickness.disabled = false;
+   188→      hintEl.hidden = true;
+   189→    }
+   190→
+   191→    SetupView.refreshStandardLengthOptions(standardLength.value);
+   192→  };
+   193→
+   194→  /** پرکردن دراپ‌داون متراژ استاندارد فقط با قوانینِ ضخامت فعلی (§24) */
+   195→  SetupView.refreshStandardLengthOptions = function (keepValue = null) {
+   196→    const { thickness, standardLength } = F();
+   197→    const thicknessValue = U.parseNumber(thickness.value);
+   198→    const errEl = document.getElementById('err-standard');
+   199→
+   200→    const options = thicknessValue === null
+   201→      ? []
+   202→      : RM.rulesEngine.standardLengthsFor(SetupView.currentRules, thicknessValue);
+   203→
+   204→    let html = '<option value="">— انتخاب کنید —</option>';
+   205→    for (const opt of options) {
+   206→      html += `<option value="${opt}">${U.faNum(opt)}</option>`;
+   207→    }
+   208→    standardLength.innerHTML = html;
+   209→
+   210→    // نگهداری مقدار در صورت تعلق به همین ضخامت
+   211→    if (keepValue !== null && options.includes(U.parseNumber(keepValue))) {
+   212→      standardLength.value = keepValue;
+   213→    } else {
+   214→      standardLength.value = '';
+   215→    }
+   216→
+   217→    // راهنمای کاربر وقتی قوانین این ضخامت تعریف نشده
+   218→    if (thicknessValue !== null && !options.length) {
+   219→      errEl.textContent = 'برای این ضخامت قانون متراژی تعریف نشده — از تب «تنظیمات» قانون اضافه کنید.';
+   220→      errEl.hidden = false;
+   221→    } else {
+   222→      errEl.textContent = '';
+   223→      errEl.hidden = true;
+   224→    }
+   225→  };
+   226→
+   227→  /** بازخورد زندهٔ الگوی برش (§29) */
+   228→  SetupView.updatePatternFeedback = function () {
+   229→    const { width, cuttingPattern } = F();
+   230→    const box = document.getElementById('pattern-feedback');
+   231→
+   232→    const result = Setups.validatePattern(cuttingPattern.value, U.parseNumber(width.value));
+   233→
+   234→    if (!cuttingPattern.value.trim()) {
+   235→      box.className = 'pattern-feedback';
+   236→      box.innerHTML = '<span class="muted">اختیاری — مثال: 1100-1170</span>';
+   237→      return;
+   238→    }
+   239→
+   240→    if (!result.ok) {
+   241→      box.className = 'pattern-feedback invalid';
+   242→      box.innerHTML = `<span class="pf-status">✕</span> ${result.message}`;
+   243→      return;
+   244→    }
+   245→
+   246→    const motherWidth = U.parseNumber(width.value);
+   247→    const remaining = motherWidth !== null ? motherWidth - result.sum : null;
+   248→
+   249→    box.className = 'pattern-feedback valid';
+   250→    box.innerHTML =
+   251→      `<span class="pf-status">✓</span> مجموع: <b>${U.faWidth(result.sum)}</b>` +
+   252→      (remaining !== null && remaining >= 0
+   253→        ? ` · باقی‌مانده (پرت عرض): <b>${U.faWidth(remaining)}</b>`
+   254→        : '') +
+   255→      ` · بخش‌ها: ${U.faNum(result.parts.length)}`;
+   256→  };
+   257→
+   258→  /* ================================================================
+   259→     ۳) ثبت / ویرایش رکورد
+   260→     ================================================================ */
+   261→
+   262→  SetupView.submit = async function () {
+   263→    const form = document.getElementById('setup-form');
+   264→    const f = F();
+   265→    UI.clearFormErrors(form);
+   266→
+   267→    const input = {
+   268→      setupNumber: f.setupNumber.value,
+   269→      machineNumber: f.machineNumber.value,
+   270→      width: f.width.value,
+   271→      thickness: f.thickness.value,
+   272→      standardLength: f.standardLength.value,
+   273→      rollCount: f.rollCount.value,
+   274→      cuttingPattern: f.cuttingPattern.value,
+   275→    };
+   276→
+   277→    /* --- ویرایش: بررسی آبشار ضخامت (§23) --- */
+   278→    if (SetupView.editingId !== null) {
+   279→      const newThickness = U.parseNumber(input.thickness);
+   280→      const info = await Setups.cascadeInfo(SetupView.editingId, newThickness);
+   281→
+   282→      if (info.affected > 0) {
+   283→        const ok = await UI.confirm({
+   284→          title: 'تأیید تغییر ضخامت',
+   285→          html: `
+   286→            <div class="confirm-stats">
+   287→              <div>تغییر ضخامت ستاپ <b>${U.faNum(info.setupNumber)}</b> باعث تغییر ضخامت
+   288→              <b>${U.faNum(info.affected)}</b> رکورد دیگر نیز خواهد شد.</div>
+   289→            </div>`,
+   290→          message: 'این عملیات تراکنشی است و در صورت خطا به حالت قبل برمی‌گردد. ادامه می‌دهید؟',
+   291→          confirmText: 'بله، ضخامت همه را تغییر بده',
+   292→        });
+   293→        if (!ok) {
+   294→          UI.toast('عملیات ویرایش لغو شد.', 'info');
+   295→          return;
+   296→        }
+   297→      }
+   298→
+   299→      const result = await Setups.update(SetupView.editingId, input, { cascadedCount: info.affected });
+   300→      if (!result.ok) {
+   301→        SetupView.showValidationErrors(result);
+   302→        return;
+   303→      }
+   304→      UI.toast(
+   305→        (info.affected > 0
+   306→          ? `ویرایش انجام شد — ضخامت ${U.faNum(info.affected)} رکورد دیگر نیز به‌روزرسانی شد.`
+   307→          : 'رکورد با موفقیت ویرایش شد.'),
+   308→        'success'
+   309→      );
+   310→    } else {
+   311→      /* --- ثبت جدید --- */
+   312→      const result = await Setups.create(input);
+   313→      if (!result.ok) {
+   314→        SetupView.showValidationErrors(result);
+   315→        return;
+   316→      }
+   317→      UI.toast('رکورد ستاپ جدید ذخیره شد.', 'success');
+   318→    }
+   319→
+   320→    SetupView.resetForm();
+   321→    await RM.refreshAll();
+   322→    await SetupView.render();
+   323→  };
+   324→
+   325→  /** نمایش خطاهای Field-Level (§69): حاشیهٔ قرمز + پیام + فوکوس */
+   326→  SetupView.showValidationErrors = function (result) {
+   327→    const form = document.getElementById('setup-form');
+   328→    const f = F();
+   329→    const fieldMap = {
+   330→      setupNumber: [f.setupNumber, document.getElementById('err-setup')],
+   331→      machineNumber: [f.machineNumber, document.getElementById('err-machine')],
+   332→      width: [f.width, document.getElementById('err-width')],
+   333→      thickness: [f.thickness, document.getElementById('err-thickness')],
+   334→      standardLength: [f.standardLength, document.getElementById('err-standard')],
+   335→      rollCount: [f.rollCount, document.getElementById('err-count')],
+   336→      cuttingPattern: [f.cuttingPattern, document.getElementById('err-pattern')],
+   337→    };
+   338→
+   339→    let firstInvalid = null;
+   340→    for (const [field, [input, errEl]] of Object.entries(fieldMap)) {
+   341→      const msg = result.errors && result.errors[field];
+   342→      UI.setFieldError(input, errEl, msg);
+   343→      if (msg && !firstInvalid) firstInvalid = input;
+   344→    }
+   345→
+   346→    if (result.message) UI.toast(U.escapeHtml(result.message), 'error');
+   347→    if (firstInvalid) firstInvalid.focus();
+   348→  };
+   349→
+   350→  /* ================================================================
+   351→     ۴) حالت ویرایش
+   352→     ================================================================ */
+   353→
+   354→  SetupView.startEdit = async function (id) {
+   355→    const record = await db.setupRolls.get(id);
+   356→    if (!record) return;
+   357→
+   358→    const f = F();
+   359→    SetupView.editingId = id;
+   360→
+   361→    f.setupNumber.value = String(record.setupNumber);
+   362→    f.machineNumber.value = String(record.machineNumber);
+   363→    f.width.value = String(record.width);
+   364→    f.thickness.value = record.thickness !== null ? String(record.thickness) : '';
+   365→    f.rollCount.value = String(record.rollCount);
+   366→    f.cuttingPattern.value = record.cuttingPattern || '';
+   367→
+   368→    // در ویرایش ضخامت آزاد است (§23) — آبشار در ثبت گرفته می‌شود
+   369→    SetupView.thicknessLocked = false;
+   370→    f.thickness.disabled = false;
+   371→    document.getElementById('hint-thickness').hidden = true;
+   372→
+   373→    SetupView.refreshStandardLengthOptions(
+   374→      record.standardLength !== null ? String(record.standardLength) : null
+   375→    );
+   376→    f.standardLength.value = record.standardLength !== null ? String(record.standardLength) : '';
+   377→    SetupView.updatePatternFeedback();
+   378→
+   379→    // تغییر حالت فرم به ویرایش
+   380→    document.getElementById('setup-form-title').textContent = `ویرایش رکورد ستاپ #${U.faNum(id)}`;
+   381→    document.getElementById('btn-save-roll').innerHTML = `${UI.icons.check} ذخیرهٔ تغییرات`;
+   382→    document.getElementById('btn-cancel-edit').hidden = false;
+   383→
+   384→    // اسکرول به فرم + فوکوس
+   385→    document.getElementById('view-setup').scrollIntoView({ behavior: 'smooth', block: 'start' });
+   386→    f.setupNumber.focus();
+   387→  };
+   388→
+   389→  /** بازگشت فرم به حالت ثبت جدید */
+   390→  SetupView.resetForm = function () {
+   391→    const form = document.getElementById('setup-form');
+   392→    const f = F();
+   393→
+   394→    form.reset();
+   395→    UI.clearFormErrors(form);
+   396→    SetupView.editingId = null;
+   397→    SetupView.thicknessLocked = false;
+   398→    f.thickness.disabled = false;
+   399→    document.getElementById('hint-thickness').hidden = true;
+   400→    document.getElementById('pattern-feedback').className = 'pattern-feedback';
+   401→    document.getElementById('pattern-feedback').innerHTML = '<span class="muted">اختیاری — مثال: 1100-1170</span>';
+   402→
+   403→    document.getElementById('setup-form-title').textContent = 'ثبت رول جدید برای ستاپ';
+   404→    document.getElementById('btn-save-roll').innerHTML = `${UI.icons.plus} ذخیره رکورد`;
+   405→    document.getElementById('btn-cancel-edit').hidden = true;
+   406→
+   407→    SetupView.refreshStandardLengthOptions();
+   408→  };
+   409→
+   410→  /* ================================================================
+   411→     ۵-ب) ثبت گروهی از Clipboard — Bulk Paste (§4 اصلاحات)
+   412→     ----------------------------------------------------------------
+   413→     جریان: تحلیل → پیش‌نمایش «قابل ویرایش» → اعتبارسنجی زنده →
+   414→     ثبت همه در یک تراکنش واحد. پس از تحلیل:
+   415→       • شماره ستاپ و ضخامت سراسری برای کل رکوردها (نوار بالا)
+   416→       • دستگاه و متراژ استاندارد (از قوانینِ ضخامت سراسری) به‌صورت
+   417→         پیش‌فرض یا رکوردبه‌رکورد
+   418→       • همهٔ فیلدهای هر رکورد (عرض مادر، الگوی برش، تعداد رول) قابل ویرایش
+   419→       • خلاصهٔ زندهٔ رکوردها (عرض‌های مادر/رول‌های الگو/جمع ست‌ها/یونیک‌ها)
+   420→     ================================================================ */
+   421→
+   422→  /** وضعیت Bulk: { common:{setupNumber,thickness}, drafts:[…], structureErrors:[…] } */
+   423→  SetupView._bulk = null;
+   424→  SetupView._bulkCheck = null;          // آخرین نتیجهٔ اعتبارسنجی
+   425→  SetupView._bulkValidateTimer = null;  // debounce اعتبارسنجی زنده
+   426→
+   427→  /** مقادیر اولیهٔ تحلیل از فرم دستی (پایهٔ پیش‌فرض‌های پیش‌نمایش) */
+   428→  SetupView.bulkCommonInput = function () {
+   429→    const f = F();
+   430→    return {
+   431→      setupNumber: f.setupNumber.value,
+   432→      machineNumber: f.machineNumber.value,
+   433→      thickness: f.thickness.value,
+   434→      standardLength: f.standardLength.value,
+   435→    };
+   436→  };
+   437→
+   438→  /** تحلیل + پیش‌نمایش — بدون ثبت (dry-run) */
+   439→  SetupView.analyzeBulk = async function () {
+   440→    const textarea = document.getElementById('bulk-text');
+   441→    const text = textarea.value;
+   442→
+   443→    if (!text.trim()) {
+   444→      UI.toast('متن Paste شده خالی است — داده‌ها را در کادر بالا وارد کنید.', 'warning');
+   445→      return;
+   446→    }
+   447→
+   448→    // قوانین تازه برای گزینه‌های متراژ استاندارد
+   449→    SetupView.currentRules = await db.standardLengthRules.toArray();
+   450→
+   451→    const commonInit = SetupView.bulkCommonInput();
+   452→    const { drafts, structureErrors, allowedMap } = Setups.buildBulkDraft(commonInit, text);
+   453→
+   454→    SetupView._bulk = {
+   455→      common: { setupNumber: commonInit.setupNumber, thickness: commonInit.thickness },
+   456→      drafts,
+   457→      structureErrors,
+   458→      /* --- مرجع «تعداد مجاز» عرض‌های مادر دیتای پیست‌شده (تغییر ۱):
+   459→             در لحظهٔ تحلیل یک‌بار محاسبه و ثابت می‌ماند تا با ویرایش‌های
+   460→             پیش‌نمایش (تعداد/متراژ/حذف/ادغام) مقایسه شود. --- */
+   461→      allowedMap: allowedMap || {},
+   462→    };
+   463→
+   464→    SetupView.renderBulkPreview();
+   465→    SetupView.renderBulkSummary();
+   466→    SetupView.revalidateBulk();
+   467→  };
+   468→
+   469→  /**
+   470→   * خلاصهٔ زندهٔ رکوردهای تشخیص‌داده‌شده — با هر تغییری در رکوردها
+   471→   * بلافاصله به‌روز می‌شود (روش محاسبه + تغییر ۱ — تعداد ست):
+   472→   *   جمع عرض رول مادر   = Σ ستون تعداد (مجموع تعداد رول‌های مادر)
+   473→   *   یونیک رول مادر     = تعداد عرض‌های یکتای مادر (مثل ۲۲۸۰/۲۳۸۰/۲۳۰۰ = ۳)
+   474→   *   جمع عرض الگوی برش = Σ (تعداد عرض‌های الگوی هر رکورد × تعداد ست × تعداد)
+   475→   *   یونیک عرض الگو     = تعداد عرض‌های یکتای برش (مثل ۷۸۰/۷۰۰/۸۰۰/۹۰۰/۷۴۰ = ۵)
+   476→   * تعداد ست هر رکورد = متراژ استاندارد ÷ کوچکترین متراژ استاندارد ضخامت
+   477→   * سراسری (رول ۱ ستی) — اگر متراژ انتخاب نشده باشد، ۱ ست فرض می‌شود.
+   478→   * مثال مرجع (۴ رکورد با تعداد ۲/۷/۵/۲ و الگوهای سه‌تکه ۱-ستی):
+   479→   *   ۱۶ / ۳ / ۴۸ / ۵
+   480→   */
+   481→  SetupView.bulkSummaryStats = function (drafts, rules = [], thickness = null) {
+   482→    let motherRollsTotal = 0;      // Σ تعداد — «جمع عرض رول مادر»
+   483→    let patternWidthsTotal = 0;    // Σ (تعداد عرض الگو × تعداد ست × تعداد) — «جمع عرض الگوی برش»
+   484→    const motherWidthSet = new Set();   // عرض‌های یکتای مادر
+   485→    const patternWidthSet = new Set();  // عرض‌های یکتای الگو
+   486→
+   487→    for (const d of drafts) {
+   488→      const rollCount = d.rollCount === null ? 0 : (d.rollCount || 0);
+   489→      motherRollsTotal += rollCount;
+   490→
+   491→      const w = U.parseNumber(d.motherToken);
+   492→      if (w !== null) motherWidthSet.add(w);
+   493→
+   494→      const parsed = Setups.parsePattern(d.patternText);
+   495→      if (parsed.ok && parsed.parts.length) {
+   496→        /* --- تغییر ۱: تعداد فرزند = قطعه‌های الگو × تعداد ست × تعداد مادر --- */
+   497→        const std = U.parseNumber(d.standardLength);
+   498→        const sc = RM.rulesEngine.setCount(rules, thickness, std);
+   499→        const setCount = sc !== null && sc > 0 ? sc : 1;
+   500→        patternWidthsTotal += parsed.parts.length * setCount * rollCount;
+   501→        for (const part of parsed.parts) patternWidthSet.add(part);
+   502→      }
+   503→    }
+   504→
+   505→    return {
+   506→      count: drafts.length,
+   507→      motherRollsTotal,                            // ۱۶
+   508→      uniqueMotherWidths: motherWidthSet.size,     // ۳
+   509→      patternWidthsTotal,                          // ۴۸ (با تعداد ست ضرب می‌شود)
+   510→      uniquePatternWidths: patternWidthSet.size,   // ۵
+   511→    };
+   512→  };
+   513→
+   514→  /** رندر خلاصهٔ زنده در #bulk-summary (برچسب‌ها مطابق روش محاسبه + تعداد ست) */
+   515→  SetupView.renderBulkSummary = function () {
+   516→    const el = document.getElementById('bulk-summary');
+   517→    const b = SetupView._bulk;
+   518→    if (!el) return;
+   519→    if (!b || !b.drafts.length) { el.innerHTML = ''; return; }
+   520→
+   521→    const s = SetupView.bulkSummaryStats(
+   522→      b.drafts, SetupView.currentRules, U.parseNumber(b.common.thickness));
+   523→    el.innerHTML = `
+   524→      <span class="chip">رکوردها: ${U.faNum(s.count)}</span>
+   525→      <span class="chip chip-strong">جمع عرض رول مادر: ${U.faNum(s.motherRollsTotal)}</span>
+   526→      <span class="chip chip-ok">یونیک رول مادر: ${U.faNum(s.uniqueMotherWidths)}</span>
+   527→      <span class="chip chip-strong">جمع عرض الگوی برش: ${U.faNum(s.patternWidthsTotal)}</span>
+   528→      <span class="chip chip-ok">یونیک عرض الگوی برش: ${U.faNum(s.uniquePatternWidths)}</span>`;
+   529→  };
+   530→
+   531→  /** گزینه‌های متراژ استاندارد از قوانینِ ضخامت سراسری فعلی */
+   532→  SetupView.bulkStandardOptions = function () {
+   533→    const b = SetupView._bulk;
+   534→    const t = b ? U.parseNumber(b.common.thickness) : null;
+   535→    return t === null ? [] : RM.rulesEngine.standardLengthsFor(SetupView.currentRules, t);
+   536→  };
+   537→
+   538→  /** HTML یک ردیف قابل ویرایش پیش‌نمایش Bulk */
+   539→  SetupView.bulkRowHtml = function (d, i, standardOptions) {
+   540→    const pairsTxt = (d.pairs && d.pairs.length > 1)
+   541→      ? ` (جفت ${d.pairs.map((p) => U.faNum(p)).join('،')})`
+   542→      : '';
+   543→    const occTxt = (d.occurrences || 1) > 1 ? ` ×${U.faNum(d.occurrences)}` : '';
+   544→
+   545→    const machineSel = `<select data-bulk-field="machineNumber" data-bulk-row="${i}" aria-label="شماره دستگاه رکورد ${U.faNum(i + 1)}">
+   546→        <option value="">—</option>
+   547→        ${[1, 2, 3].map((m) => `<option value="${m}" ${String(m) === String(d.machineNumber) ? 'selected' : ''}>دستگاه ${U.faNum(m)}</option>`).join('')}
+   548→      </select>`;
+   549→
+   550→    const stdSel = `<select data-bulk-field="standardLength" data-bulk-row="${i}" aria-label="متراژ استاندارد رکورد ${U.faNum(i + 1)}">
+   551→        <option value="">—</option>
+   552→        ${standardOptions.map((o) => `<option value="${o}" ${String(o) === String(d.standardLength) ? 'selected' : ''}>${U.faNum(o)}</option>`).join('')}
+   553→      </select>`;
+   554→
+   555→    return `
+   556→      <tr data-bulk-tr="${i}">
+   557→        <td>${U.faNum(i + 1)}<span class="muted" style="font-size:.62rem">${pairsTxt}${occTxt}</span></td>
+   558→        <td><input type="text" inputmode="numeric" dir="ltr" class="bulk-input" value="${U.escapeHtml(d.motherToken ?? '')}"
+   559→               data-bulk-field="motherToken" data-bulk-row="${i}" aria-label="عرض مادر رکورد ${U.faNum(i + 1)}"></td>
+   560→        <td><input type="text" dir="ltr" class="bulk-input bulk-input-pattern" value="${U.escapeHtml(d.patternText ?? '')}"
+   561→               data-bulk-field="patternText" data-bulk-row="${i}" aria-label="الگوی برش رکورد ${U.faNum(i + 1)}"></td>
+   562→        <td><input type="text" inputmode="numeric" dir="ltr" class="bulk-input bulk-input-count" value="${d.rollCount === null ? '' : String(d.rollCount)}"
+   563→               data-bulk-field="rollCount" data-bulk-row="${i}" aria-label="تعداد رول رکورد ${U.faNum(i + 1)}"></td>
+   564→        <td>${machineSel}</td>
+   565→        <td>${stdSel}</td>
+   566→        <td data-bulk-cell="sum"><span class="muted">—</span></td>
+   567→        <td data-bulk-cell="trim"><span class="muted">—</span></td>
+   568→        <td class="bulk-status" data-bulk-cell="status"><span class="muted">…</span></td>
+   569→        <td class="bulk-del-cell">
+   570→          <div class="bulk-row-actions">
+   571→            <button type="button" class="btn btn-ghost btn-icon bulk-merge-btn" data-bulk-merge="${i}" hidden
+   572→                    title="ادغام این ردیف تکراری با ردیف معتبر همتا (جمع تعداد رول)" aria-label="ادغام رکورد ${U.faNum(i + 1)} با همتای معتبر">
+   573→              ${UI.icons.merge}
+   574→            </button>
+   575→            <button type="button" class="btn btn-ghost btn-icon bulk-del-btn" data-bulk-del="${i}"
+   576→                    title="حذف این ردیف از پیش‌نمایش" aria-label="حذف رکورد ${U.faNum(i + 1)} از پیش‌نمایش">
+   577→              ${UI.icons.trash}
+   578→            </button>
+   579→          </div>
+   580→        </td>
+   581→      </tr>`;
+   582→  };
+   583→
+   584→  /** رندر کامل پیش‌نمایش — نوار فیلدهای سراسری + جدول قابل ویرایش */
+   585→  SetupView.renderBulkPreview = function () {
+   586→    const wrap = document.getElementById('bulk-preview');
+   587→    const commitBtn = document.getElementById('btn-bulk-commit');
+   588→    const b = SetupView._bulk;
+   589→
+   590→    if (!b || !b.drafts.length) {
+   591→      const structureHtml = b && b.structureErrors.length
+   592→        ? `<div class="bulk-alert">${b.structureErrors.map((e) =>
+   593→            `<div class="bulk-common-error">✕ <b>ساختار:</b> ${U.escapeHtml(e.message)}</div>`).join('')}</div>`
+   594→        : '';
+   595→      wrap.innerHTML = structureHtml;
+   596→      commitBtn.disabled = true;
+   597→      return;
+   598→    }
+   599→
+   600→    const standardOptions = SetupView.bulkStandardOptions();
+   601→    const structureHtml = b.structureErrors.length
+   602→      ? `<div class="bulk-alert">${b.structureErrors.map((e) =>
+   603→          `<div class="bulk-common-error">✕ <b>ساختار:</b> ${U.escapeHtml(e.message)}</div>`).join('')}</div>`
+   604→      : '';
+   605→
+   606→    wrap.innerHTML = `
+   607→      <div class="bulk-toolbar">
+   608→        <div class="field">
+   609→          <label for="bulk-g-setup">شماره ستاپ (کل رکوردها) <b class="req">*</b></label>
+   610→          <input type="text" id="bulk-g-setup" inputmode="numeric" autocomplete="off"
+   611→                 value="${U.escapeHtml(b.common.setupNumber ?? '')}" placeholder="مثلاً ۱۴۰">
+   612→          <p class="field-error" id="bulk-g-err-setup" hidden></p>
+   613→        </div>
+   614→        <div class="field">
+   615→          <label for="bulk-g-thickness">ضخامت (کل رکوردها) <span class="unit">(میکرون)</span> <b class="req">*</b></label>
+   616→          <input type="text" id="bulk-g-thickness" inputmode="numeric" autocomplete="off"
+   617→                 value="${U.escapeHtml(b.common.thickness ?? '')}" placeholder="مثلاً ۲۰">
+   618→          <p class="field-error" id="bulk-g-err-thickness" hidden></p>
+   619→        </div>
+   620→        <div class="field">
+   621→          <label for="bulk-g-machine">دستگاه پیش‌فرض</label>
+   622→          <select id="bulk-g-machine">
+   623→            <option value="">— بدون تغییر —</option>
+   624→            <option value="1">دستگاه ۱</option>
+   625→            <option value="2">دستگاه ۲</option>
+   626→            <option value="3">دستگاه ۳</option>
+   627→          </select>
+   628→        </div>
+   629→        <div class="field">
+   630→          <label for="bulk-g-standard">متراژ استاندارد پیش‌فرض</label>
+   631→          <select id="bulk-g-standard">
+   632→            <option value="">— بدون تغییر —</option>
+   633→            ${standardOptions.map((o) => `<option value="${o}">${U.faNum(o)}</option>`).join('')}
+   634→          </select>
+   635→          <p class="field-hint">متراژهای ممکن از قوانینِ «تعریف قانون متراژ استاندارد» برای ضخامت سراسری خوانده می‌شود.</p>
+   636→        </div>
+   637→        <div class="field field-actions">
+   638→          <button type="button" class="btn btn-ghost btn-sm" id="bulk-g-apply">اعمال پیش‌فرض‌ها روی همهٔ رکوردها</button>
+   639→        </div>
+   640→      </div>
+   641→      ${structureHtml}
+   642→      <div class="table-wrap">
+   643→        <table class="data-table bulk-table">
+   644→          <thead><tr>
+   645→            <th>#</th><th>عرض مادر</th><th>الگوی برش</th><th>تعداد رول</th><th>دستگاه</th>
+   646→            <th>متراژ استاندارد</th><th>مجموع الگو</th><th>پرت عرض</th><th>وضعیت</th><th>عملیات</th>
+   647→          </tr></thead>
+   648→          <tbody>${b.drafts.map((d, i) => SetupView.bulkRowHtml(d, i, standardOptions)).join('')}</tbody>
+   649→        </table>
+   650→      </div>
+   651→      <div id="bulk-allowed-panel" hidden></div>`;
+   652→
+   653→    /* --- فیلدهای سراسری: به‌روزرسانی وضعیت + بازسازی گزینه‌های متراژ --- */
+   654→    const gSetup = document.getElementById('bulk-g-setup');
+   655→    const gThickness = document.getElementById('bulk-g-thickness');
+   656→
+   657→    gSetup.addEventListener('input', () => {
+   658→      b.common.setupNumber = gSetup.value;
+   659→      SetupView.scheduleBulkRevalidate();
+   660→    });
+   661→    gThickness.addEventListener('input', () => {
+   662→      b.common.thickness = gThickness.value;
+   663→      SetupView.rebuildBulkStandardOptions();
+   664→      SetupView.scheduleBulkRevalidate();
+   665→    });
+   666→
+   667→    /* --- اعمال پیش‌فرض‌های دستگاه/متراژ روی همهٔ رکوردها --- */
+   668→    document.getElementById('bulk-g-apply').addEventListener('click', () => {
+   669→      const machine = document.getElementById('bulk-g-machine').value;
+   670→      const standard = document.getElementById('bulk-g-standard').value;
+   671→      if (machine === '' && standard === '') {
+   672→        UI.toast('ابتدا دستگاه یا متراژ استاندارد پیش‌فرض را انتخاب کنید.', 'info');
+   673→        return;
+   674→      }
+   675→      for (const d of b.drafts) {
+   676→        if (machine !== '') d.machineNumber = machine;
+   677→        if (standard !== '') d.standardLength = standard;
+   678→      }
+   679→      SetupView.renderBulkPreview();
+   680→      SetupView.renderBulkSummary();
+   681→      SetupView.revalidateBulk();
+   682→      UI.toast('پیش‌فرض‌ها روی همهٔ رکوردها اعمال شد.', 'success');
+   683→    });
+   684→
+   685→    /* --- ورودی‌های هر ردیف: به‌روزرسانی زندهٔ وضعیت + خلاصه --- */
+   686→    wrap.querySelectorAll('[data-bulk-field]').forEach((el) => {
+   687→      el.addEventListener('input', () => SetupView.onBulkRowInput(el));
+   688→      el.addEventListener('change', () => SetupView.onBulkRowInput(el));
+   689→    });
+   690→
+   691→    /* --- آیکون حذف هر ردیف (نسخهٔ ۲٫۶): رکورد دلخواه از پیش‌نمایش حذف می‌شود --- */
+   692→    wrap.querySelectorAll('[data-bulk-del]').forEach((btn) => {
+   693→      btn.addEventListener('click', () => SetupView.removeBulkDraft(Number(btn.dataset.bulkDel)));
+   694→    });
+   695→
+   696→    /* --- آیکون ادغام ردیف تکراری با همتای معتبر (تغییر ۲) --- */
+   697→    wrap.querySelectorAll('[data-bulk-merge]').forEach((btn) => {
+   698→      btn.addEventListener('click', () => SetupView.mergeBulkDraft(Number(btn.dataset.bulkMerge)));
+   699→    });
+   700→
+   701→    SetupView.updateBulkRowComputed();
+   702→  };
+   703→
+   704→  /** حذف یک ردیف از پیش‌نمایش Bulk (نسخهٔ ۲٫۶) — ردیف‌ها بازشماره می‌شوند
+   705→      و خلاصه/اعتبارسنجی/دکمهٔ Commit بلافاصله به‌روز می‌شوند. */
+   706→  SetupView.removeBulkDraft = function (i) {
+   707→    const b = SetupView._bulk;
+   708→    if (!b || i < 0 || i >= b.drafts.length) return;
+   709→    const removed = b.drafts.splice(i, 1)[0];
+   710→
+   711→    SetupView.renderBulkPreview();
+   712→    SetupView.renderBulkSummary();
+   713→    SetupView.revalidateBulk();
+   714→
+   715→    UI.toast(
+   716→      b.drafts.length
+   717→        ? `ردیف ${U.faNum(i + 1)}${removed && removed.motherToken ? ` (عرض ${U.escapeHtml(String(removed.motherToken))})` : ''} از پیش‌نمایش حذف شد — ${U.faNum(b.drafts.length)} ردیف باقی است.`
+   718→        : 'آخرین ردیف حذف شد — پیش‌نمایش خالی است.',
+   719→      'info'
+   720→    );
+   721→  };
+   722→
+   723→  /** کلید یکتای یک ردیف Bulk (برای یافتن همتای هم‌کلید در پیش‌نمایش) */
+   724→  SetupView.bulkRowKey = function (d, common) {
+   725→    return Setups.uniqueKey({
+   726→      width: U.parseNumber(d.motherToken),
+   727→      setupNumber: U.parseInt(common.setupNumber),
+   728→      standardLength: U.parseNumber(d.standardLength),
+   729→      machineNumber: U.parseInt(d.machineNumber),
+   730→      cuttingPattern: d.patternText,
+   731→    });
+   732→  };
+   733→
+   734→  /** ادغام ردیف تکراری با همتای معتبرش (تغییر ۲) — تعداد رول ردیف تکراری
+   735→      به تعداد رول همتای معتبر اضافه می‌شود، ردیف تکراری حذف می‌شود و
+   736→      خلاصه/اعتبارسنجی/دکمهٔ Commit بلافاصله به‌روز می‌شوند.
+   737→      مثال: تکراری با تعداد ۲ + معتبر با تعداد ۵ → همتا ۷ می‌شود. */
+   738→  SetupView.mergeBulkDraft = function (i) {
+   739→    const b = SetupView._bulk;
+   740→    if (!b || i < 0 || i >= b.drafts.length) return;
+   741→
+   742→    const tr = document.querySelector(`[data-bulk-tr="${i}"]`);
+   743→    const btn = tr ? tr.querySelector('[data-bulk-merge]') : null;
+   744→    const target = btn ? Number(btn.dataset.mergeTarget) : NaN;
+   745→    if (!Number.isInteger(target) || target < 0 || target >= b.drafts.length || target === i) {
+   746→      UI.toast('همتای معتبری برای ادغام این ردیف یافت نشد.', 'warning');
+   747→      return;
+   748→    }
+   749→
+   750→    const dup = b.drafts[i];
+   751→    const dest = b.drafts[target];
+   752→    const dupCount = dup.rollCount === null ? 0 : (dup.rollCount || 0);
+   753→    const destCount = dest.rollCount === null ? 0 : (dest.rollCount || 0);
+   754→
+   755→    dest.rollCount = destCount + dupCount;
+   756→
+   757→    const dupWidth = U.escapeHtml(String(dup.motherToken ?? '?'));
+   758→    b.drafts.splice(i, 1);
+   759→
+   760→    SetupView.renderBulkPreview();
+   761→    SetupView.renderBulkSummary();
+   762→    SetupView.revalidateBulk();
+   763→
+   764→    UI.toast(
+   765→      `ردیف تکراری (عرض ${dupWidth}، تعداد ${U.faNum(dupCount)}) در همتای معتبرش ادغام شد — تعداد رول همتا: ${U.faNum(destCount)} + ${U.faNum(dupCount)} = ${U.faNum(dest.rollCount)}.`,
+   766→      'success',
+   767→      6000
+   768→    );
+   769→  };
+   770→
+   771→  /** تغییر یک فیلد رکورد — خلاصه/سلول‌های همان ردیف بلافاصله؛ اعتبارسنجی با debounce */
+   772→  SetupView.onBulkRowInput = function (el) {
+   773→    const b = SetupView._bulk;
+   774→    if (!b) return;
+   775→    const i = Number(el.dataset.bulkRow);
+   776→    const draft = b.drafts[i];
+   777→    if (!draft) return;
+   778→
+   779→    const field = el.dataset.bulkField;
+   780→    if (field === 'rollCount') {
+   781→      const v = U.parseInt(el.value);
+   782→      draft.rollCount = v === null ? null : v;
+   783→    } else {
+   784→      draft[field] = el.value;
+   785→    }
+   786→
+   787→    SetupView.renderBulkSummary();          // زنده — بلافاصله
+   788→    SetupView.updateBulkRowComputed(i);
+   789→    SetupView.scheduleBulkRevalidate();
+   790→  };
+   791→
+   792→  /** سلول‌های محاسباتی ردیف‌ها (مجموع الگو / پرت عرض) */
+   793→  SetupView.updateBulkRowComputed = function (rowIdx = null) {
+   794→    const b = SetupView._bulk;
+   795→    if (!b) return;
+   796→    const rowsIdx = rowIdx === null ? b.drafts.map((_, i) => i) : [rowIdx];
+   797→
+   798→    for (const i of rowsIdx) {
+   799→      const tr = document.querySelector(`[data-bulk-tr="${i}"]`);
+   800→      if (!tr) continue;
+   801→      const d = b.drafts[i];
+   802→
+   803→      const parsed = Setups.parsePattern(d.patternText);
+   804→      const mother = U.parseNumber(d.motherToken);
+   805→      const sum = parsed.ok ? parsed.sum : null;
+   806→      const trim = parsed.ok && mother !== null ? mother - sum : null;
+   807→
+   808→      tr.querySelector('[data-bulk-cell="sum"]').innerHTML =
+   809→        sum !== null ? U.faWidth(sum) : '<span class="muted">—</span>';
+   810→      tr.querySelector('[data-bulk-cell="trim"]').innerHTML =
+   811→        trim !== null && trim >= 0 ? U.faWidth(trim) : '<span class="muted">—</span>';
+   812→    }
+   813→  };
+   814→
+   815→  /**
+   816→   * بازسازی گزینه‌های «متراژ استاندارد» با تغییر ضخامت سراسری —
+   817→   * مقدار رکوردها اگر در قوانین ضخامت جدید معتبر باشد حفظ می‌شود.
+   818→   */
+   819→  SetupView.rebuildBulkStandardOptions = function () {
+   820→    const b = SetupView._bulk;
+   821→    if (!b) return;
+   822→    const options = SetupView.bulkStandardOptions();
+   823→    const optionsStr = options.map(String);
+   824→
+   825→    for (let i = 0; i < b.drafts.length; i++) {
+   826→      const sel = document.querySelector(`[data-bulk-field="standardLength"][data-bulk-row="${i}"]`);
+   827→      if (!sel) continue;
+   828→      const keep = optionsStr.includes(String(b.drafts[i].standardLength)) ? b.drafts[i].standardLength : '';
+   829→      b.drafts[i].standardLength = keep;
+   830→      sel.innerHTML = '<option value="">—</option>' +
+   831→        options.map((o) => `<option value="${o}" ${String(o) === String(keep) ? 'selected' : ''}>${U.faNum(o)}</option>`).join('');
+   832→    }
+   833→
+   834→    const g = document.getElementById('bulk-g-standard');
+   835→    if (g) {
+   836→      g.innerHTML = '<option value="">— بدون تغییر —</option>' +
+   837→        options.map((o) => `<option value="${o}">${U.faNum(o)}</option>`).join('');
+   838→    }
+   839→  };
+   840→
+   841→  /** اعتبارسنجی زنده با debounce (پس از توقف تایپ) */
+   842→  SetupView.scheduleBulkRevalidate = function () {
+   843→    clearTimeout(SetupView._bulkValidateTimer);
+   844→    SetupView._bulkValidateTimer = setTimeout(() => SetupView.revalidateBulk(), 350);
+   845→  };
+   846→
+   847→  /** اعتبارسنجی زندهٔ پیش‌نمایش + به‌روزرسانی وضعیت ردیف‌ها و دکمهٔ Commit */
+   848→  SetupView.revalidateBulk = async function () {
+   849→    const b = SetupView._bulk;
+   850→    if (!b) return;
+   851→    const check = await Setups.validateBulkDraft(b.common, b.drafts, { allowedMap: b.allowedMap });
+   852→    SetupView.applyBulkCheck(check);
+   853→  };
+   854→
+   855→  /** رندر پنل «کنترل تعداد مجاز عرض‌های مادر» (تغییر ۱) — از نتیجهٔ
+   856→      اعتبارسنجی زنده؛ با هر ویرایش/حذف/ادغام/تغییر متراژ به‌روز می‌شود.
+   857→      هر ردیف: عرض یکتای مادر · «تعداد مجاز» دیتای پیست‌شده (عرض × تکرار ×
+   858→      عدد انتهایی) · «تعداد مجاز» پیش‌نمایش (عرض × تعداد ست × تعداد) · وضعیت. */
+   859→  SetupView.renderBulkAllowedPanel = function (check) {
+   860→    const wrap = document.getElementById('bulk-allowed-panel');
+   861→    if (!wrap) return;
+   862→
+   863→    const b = SetupView._bulk;
+   864→    const rows = (check && Array.isArray(check.allowedRows)) ? check.allowedRows : null;
+   865→    if (!b || !b.drafts.length || !rows || !rows.length) {
+   866→      wrap.innerHTML = '';
+   867→      wrap.hidden = true;
+   868→      return;
+   869→    }
+   870→    wrap.hidden = false;
+   871→
+   872→    const STATUS = {
+   873→      ok:   '<span class="status-pill pill-ok" title="دو مقدار برابرند — کنترل پاس شد">✓ برابر</span>',
+   874→      less: '<span class="status-pill pill-bad" title="پیش‌نمایش کمتر از دیتای پیست‌شده است — تعداد کمتر از دیتای ستاپ است">✕ کمتر از دیتای ستاپ</span>',
+   875→      more: '<span class="status-pill pill-bad" title="پیش‌نمایش بیشتر از دیتای پیست‌شده است — تعداد رول‌های آن عرض بیشتر از دیتای ستاپ است">✕ بیشتر از دیتای ستاپ</span>',
+   876→    };
+   877→
+   878→    const fmt = (n) => U.faNum(n);
+   879→    wrap.innerHTML = `
+   880→      <div class="bulk-allowed">
+   881→        <div class="bulk-allowed-head">
+   882→          <b>کنترل «تعداد مجاز» عرض‌های مادر:</b>
+   883→          <span class="muted">عرض × (تعداد تکرار در ردیف مادر × عدد انتهایی ردیف الگو) در دیتای پیست‌شده باید برابر عرض × (تعداد ست × تعداد رول) پیش‌نمایش باشد</span>
+   884→        </div>
+   885→        <div class="table-wrap">
+   886→          <table class="data-table bulk-allowed-table"><thead><tr>
+   887→            <th>عرض مادر</th>
+   888→            <th>تعداد مجاز (دیتای پیست‌شده)</th>
+   889→            <th>تعداد مجاز (پیش‌نمایش)</th>
+   890→            <th>وضعیت</th>
+   891→          </tr></thead><tbody>
+   892→            ${rows.map((r) => `<tr class="${r.status === 'ok' ? '' : 'bulk-allowed-bad'}">
+   893→              <td class="em-cell">${U.faWidth(r.width)}</td>
+   894→              <td title="Σ (تکرار × عدد انتهایی) = ${fmt(r.pastedCount)} × عرض ${U.faWidth(r.width)}">${fmt(r.pasted)}</td>
+   895→              <td title="Σ (تعداد ست × تعداد) = ${fmt(r.previewCount)} × عرض ${U.faWidth(r.width)}${r.previewCount === 0 ? ' — رکوردی با این عرض در پیش‌نمایش نیست' : ''}">${fmt(r.preview)}</td>
+   896→              <td>${STATUS[r.status] || ''}</td>
+   897→            </tr>`).join('')}
+   898→          </tbody></table>
+   899→        </div>
+   900→      </div>`;
+   901→  };
+   902→
+   903→  /** اعمال نتیجهٔ اعتبارسنجی روی UI پیش‌نمایش (خطاهای سراسری + وضعیت ردیف‌ها) */
+   904→  SetupView.applyBulkCheck = function (check) {
+   905→    SetupView._bulkCheck = check;
+   906→    const b = SetupView._bulk;
+   907→    if (!b) return;
+   908→
+   909→    // خطاهای فیلدهای سراسری زیر ورودی‌های خودشان
+   910→    const globalMap = {
+   911→      setupNumber: ['bulk-g-err-setup', 'bulk-g-setup'],
+   912→      thickness: ['bulk-g-err-thickness', 'bulk-g-thickness'],
+   913→    };
+   914→    for (const [field, [errId, inputId]] of Object.entries(globalMap)) {
+   915→      const errEl = document.getElementById(errId);
+   916→      const inputEl = document.getElementById(inputId);
+   917→      const msg = check.globalErrors[field] || '';
+   918→      if (errEl) { errEl.textContent = msg; errEl.hidden = !msg; }
+   919→      if (inputEl) inputEl.classList.toggle('invalid', !!msg);
+   920→    }
+   921→
+   922→    // وضعیت هر ردیف
+   923→    b.drafts.forEach((d, i) => {
+   924→      const tr = document.querySelector(`[data-bulk-tr="${i}"]`);
+   925→      if (!tr) return;
+   926→      const cell = tr.querySelector('[data-bulk-cell="status"]');
+   927→      const rec = check.records[i];
+   928→      const errs = rec ? rec.errors : [];
+   929→      tr.classList.toggle('bulk-row-error', errs.length > 0);
+   930→      cell.innerHTML = errs.length
+   931→        ? `<span class="status-pill pill-bad">✕ خطا</span>
+   932→           <ul class="bulk-errors">${errs.map((e) => `<li>${U.escapeHtml(e)}</li>`).join('')}</ul>`
+   933→        : '<span class="status-pill pill-ok">✓ معتبر</span>';
+   934→    });
+   935→
+   936→    /* --- تغییر ۲ (نسخهٔ قبل): آیکون ادغام ردیف‌های تکراری با همتای معتبر ---
+   937→       ردیفی که خطای «تکراری» دارد و ردیف معتبری با همان کلید یکتا در همین
+   938→       Batch وجود دارد → دکمهٔ ادغام کنار آیکون حذف نمایش داده می‌شود. */
+   939→    const validKeyIndex = new Map();   // uniqueKey → اندیس اولین ردیف معتبر
+   940→    b.drafts.forEach((d, i) => {
+   941→      const rec = check.records[i];
+   942→      if (rec && !rec.errors.length && rec.record) {
+   943→        const k = SetupView.bulkRowKey(d, b.common);
+   944→        if (!validKeyIndex.has(k)) validKeyIndex.set(k, i);
+   945→      }
+   946→    });
+   947→    b.drafts.forEach((d, i) => {
+   948→      const tr = document.querySelector(`[data-bulk-tr="${i}"]`);
+   949→      if (!tr) return;
+   950→      const btn = tr.querySelector('[data-bulk-merge]');
+   951→      if (!btn) return;
+   952→
+   953→      const rec = check.records[i];
+   954→      const errs = rec ? rec.errors : [];
+   955→      const isDuplicate = errs.some((e) => /تکراری/.test(String(e)));
+   956→      const k = SetupView.bulkRowKey(d, b.common);
+   957→      const target = isDuplicate ? (validKeyIndex.get(k) ?? null) : null;
+   958→
+   959→      if (target !== null && target !== i) {
+   960→        btn.hidden = false;
+   961→        btn.dataset.mergeTarget = String(target);
+   962→        btn.title = `ادغام این ردیف تکراری (تعداد ${U.faNum(d.rollCount ?? 0)}) با ردیف ${U.faNum(target + 1)} معتبر — تعداد رول جمع می‌شود`;
+   963→      } else {
+   964→        btn.hidden = true;
+   965→        delete btn.dataset.mergeTarget;
+   966→      }
+   967→    });
+   968→
+   969→    const commitBtn = document.getElementById('btn-bulk-commit');
+   970→    const hasStructure = b.structureErrors.length > 0;
+   971→    // نسخهٔ ۲٫۶: با حذف همهٔ رکوردها، دکمهٔ Commit هم غیرفعال می‌ماند
+   972→    commitBtn.disabled = !(b.drafts.length > 0 && check.ok === true && !hasStructure);
+   973→
+   974→    /* --- پنل «کنترل تعداد مجاز» (تغییر ۱) + هشدار سراسری --- */
+   975→    SetupView.renderBulkAllowedPanel(check);
+   976→  };
+   977→
+   978→  /** Commit نهایی — یک تراکنش واحد از وضعیت ویرایش‌شده؛ در صورت خطا هیچ رکوردی ثبت نمی‌شود */
+   979→  SetupView.commitBulk = async function () {
+   980→    const b = SetupView._bulk;
+   981→    if (!b || !b.drafts.length) return;
+   982→
+   983→    const result = await Setups.commitBulkDraft(b.common, b.drafts, { allowedMap: b.allowedMap });
+   984→
+   985→    if (!result.ok) {
+   986→      SetupView.applyBulkCheck(result);
+   987→      UI.toast('Batch ثبت نشد — خطاها را در پیش‌نمایش برطرف کنید (هیچ رکوردی ذخیره نشده است).', 'error', 6000);
+   988→      return;
+   989→    }
+   990→
+   991→    UI.toast(
+   992→      `${U.faNum(result.count)} رکورد ستاپ در یک تراکنش واحد ثبت شد (Bulk Paste).`,
+   993→      'success',
+   994→      5000
+   995→    );
+   996→    SetupView.resetBulk();
+   997→    await RM.refreshAll();
+   998→    await SetupView.render();
+   999→  };
+  1000→
+  1001→  /** پاک‌کردن ناحیهٔ Bulk */
+  1002→  SetupView.resetBulk = function () {
+  1003→    document.getElementById('bulk-text').value = '';
+  1004→    SetupView._bulk = null;
+  1005→    SetupView._bulkCheck = null;
+  1006→    clearTimeout(SetupView._bulkValidateTimer);
+  1007→    SetupView.renderBulkPreview();
+  1008→    SetupView.renderBulkSummary();
+  1009→  };
+  1010→
+  1011→  /* ================================================================
+  1012→     ۶) حذف‌ها (§70 — تأیید اجباری)
+  1013→     ================================================================ */
+  1014→
+  1015→  SetupView.removeRecord = async function (id) {
+  1016→    const ok = await UI.confirm({
+  1017→      title: 'حذف رکورد ستاپ',
+  1018→      message: 'آیا از حذف این رکورد مطمئن هستید؟ این عمل بازگشت‌پذیر نیست.',
+  1019→      confirmText: 'بله، حذف کن',
+  1020→      danger: true,
+  1021→    });
+  1022→    if (!ok) return;
+  1023→
+  1024→    await Setups.remove(id);
+  1025→    UI.toast('رکورد حذف شد.', 'success');
+  1026→    await RM.refreshAll();
+  1027→    await SetupView.render();
+  1028→  };
+  1029→
+  1030→  SetupView.clearAll = async function () {
+  1031→    const count = await db.setupRolls.count();
+  1032→    if (!count) return;
+  1033→
+  1034→    const ok = await UI.confirm({
+  1035→      title: 'حذف همهٔ رکوردهای ستاپ',
+  1036→      html: `<div class="confirm-stats"><div>تعداد رکوردهای قابل حذف: <b>${U.faNum(count)}</b></div></div>`,
+  1037→      message: 'تمام رکوردهای ستاپ حذف خواهند شد. ادامه می‌دهید؟',
+  1038→      confirmText: 'بله، همه را حذف کن',
+  1039→      danger: true,
+  1040→    });
+  1041→    if (!ok) return;
+  1042→
+  1043→    await db.setupRolls.clear();
+  1044→    UI.toast('همهٔ رکوردها حذف شدند.', 'success');
+  1045→    await RM.refreshAll();
+  1046→    await SetupView.render();
+  1047→  };
+  1048→
+  1049→  /* ================================================================
+  1050→     ۶) رندر جدول گزارش ستاپ‌ها (§46-§51، §30، §45)
+  1051→        + پنل مرتب‌سازی چندمرحله‌ای ماندگار + فیلتر ستون‌ها
+  1052→     ================================================================ */
+  1053→
+  1054→  /** کارت‌های الگوی برش (§30 + تغییر ۲ — نمایش کارت به ازای هر قطعه)
+  1055→      هر قطعهٔ الگو یک کارت مستقل دارد؛ عرض‌های تکراری کارت تکراری می‌سازند
+  1056→      (مثلاً الگوی 1100-1100 برای مادر 2200 → دو کارت 1100) و نشان «×تعداد»
+  1057→      زیر عرض‌ها حذف شد. زیر کارت‌ها:
+  1058→        - بدون پرت: خط «Σ مجموع قطعه‌ها · فرزند هر مادر: N رول»
+  1059→          (N = تعداد قطعه‌ها × تعداد ست — جزئیات در Tooltip)
+  1060→        - دارای پرت (مادر > Σ الگو): فقط «پرت عرض: X» نمایش داده می‌شود. */
+  1061→  SetupView.renderPatternCards = function (setup) {
+  1062→    const parsed = Setups.parsePattern(setup.cuttingPattern);
+  1063→    if (!setup.cuttingPattern) return '<span class="muted">—</span>';
+  1064→    if (!parsed.ok) return `<span class="film-bad">${U.escapeHtml(setup.cuttingPattern)}</span>`;
+  1065→
+  1066→    /* تعداد ست از موتور محاسبه (تغییر ۱) — رکورد بی‌قانون = ۱ ست */
+  1067→    const setCount = Number.isFinite(setup.setCount) && setup.setCount > 0 ? setup.setCount : 1;
+  1068→
+  1069→    /* تغییر ۲: یک کارت برای هر قطعهٔ الگو (بدون تجمیع عرض‌های یکسان) */
+  1070→    const cards = parsed.parts
+  1071→      .map((w) => `<span class="pattern-card">${U.faWidth(w)}</span>`)
+  1072→      .join('');
+  1073→
+  1074→    const trim = setup.width - parsed.sum;
+  1075→    const childPerMother = parsed.parts.length * setCount;
+  1076→
+  1077→    /* زیر کارت‌ها — فقط مقدار پرت وقتی الگو نسبت به مادر پرت دارد */
+  1078→    const caption = trim > 0
+  1079→      ? `<span class="pattern-trim" title="عرض رول مادر ${U.faWidth(setup.width)} − Σ الگو ${U.faWidth(parsed.sum)} = ${U.faWidth(trim)}">پرت عرض: ${U.faWidth(trim)}</span>`
+  1080→      : `Σ ${U.faWidth(parsed.sum)} · فرزند هر مادر: ${U.faNum(childPerMother)} رول`;
+  1081→
+  1082→    return `
+  1083→      <div class="pattern-cards">${cards}</div>
+  1084→      <div class="pattern-sum" title="${U.faNum(parsed.parts.length)} قطعه × ${U.faNum(setCount)} ست = ${U.faNum(childPerMother)} رول فرزند از هر مادر · Σ الگو = ${U.faWidth(parsed.sum)}${setCount !== 1 ? ` (تعداد ست: ${U.faNum(setCount)})` : ''}">${caption}</div>`;
+  1085→  };
+  1086→
+  1087→  /* ---------------- پنل مرتب‌سازی گزارش ستاپ‌ها (ماندگار) ---------------- */
+  1088→
+  1089→  /** ذخیرهٔ ماندگار ترتیب مرتب‌سازی (مثل رول‌های خام §38) */
+  1090→  SetupView.saveSort = function () {
+  1091→    RM.db.setSetting('setupReportSort', SetupView.sortPipeline);
+  1092→  };
+  1093→
+  1094→  SetupView.renderSortBuilder = function () {
+  1095→    UI.sortPanel(
+  1096→      document.getElementById('setup-sort-pipeline'),
+  1097→      SetupView.sortPipeline,
+  1098→      RM.config.SETUP_SORTABLE_FIELDS,
+  1099→      {
+  1100→        onDir: (i) => {
+  1101→          SetupView.sortPipeline[i].direction =
+  1102→            SetupView.sortPipeline[i].direction === 'asc' ? 'desc' : 'asc';
+  1103→          SetupView.saveSort();
+  1104→          SetupView.renderSortBuilder();
+  1105→          SetupView.renderReportTable();
+  1106→        },
+  1107→        onRemove: (i) => {
+  1108→          SetupView.sortPipeline.splice(i, 1);
+  1109→          SetupView.saveSort();
+  1110→          SetupView.renderSortBuilder();
+  1111→          SetupView.renderReportTable();
+  1112→        },
+  1113→        onReorder: (from, to) => {
+  1114→          const [moved] = SetupView.sortPipeline.splice(from, 1);
+  1115→          SetupView.sortPipeline.splice(to, 0, moved);
+  1116→          SetupView.saveSort();
+  1117→          SetupView.renderSortBuilder();
+  1118→          SetupView.renderReportTable();
+  1119→        },
+  1120→      }
+  1121→    );
+  1122→  };
+  1123→
+  1124→  /** راه‌اندازی دکمه‌های افزودن/بازنشانی فیلد مرتب‌سازی */
+  1125→  SetupView.initSortPanel = function () {
+  1126→    const addSelect = document.getElementById('setup-sort-add-select');
+  1127→
+  1128→    // گزینه‌ها از رجیستری مرکزی SETUP_SORTABLE_FIELDS
+  1129→    addSelect.innerHTML = '<option value="">افزودن فیلد…</option>' +
+  1130→      Object.entries(RM.config.SETUP_SORTABLE_FIELDS)
+  1131→        .map(([k, v]) => `<option value="${k}">${U.escapeHtml(v.label)}</option>`)
+  1132→        .join('');
+  1133→
+  1134→    document.getElementById('setup-sort-add-btn').addEventListener('click', () => {
+  1135→      const field = addSelect.value;
+  1136→      if (!field) return;
+  1137→      if (SetupView.sortPipeline.some((s) => s.field === field)) {
+  1138→        UI.toast('این فیلد قبلاً به مرتب‌سازی اضافه شده است.', 'info');
+  1139→        return;
+  1140→      }
+  1141→      SetupView.sortPipeline.push({ field, direction: 'asc' });
+  1142→      SetupView.saveSort();
+  1143→      SetupView.renderSortBuilder();
+  1144→      SetupView.renderReportTable();
+  1145→    });
+  1146→
+  1147→    document.getElementById('setup-sort-reset-btn').addEventListener('click', () => {
+  1148→      SetupView.sortPipeline = JSON.parse(JSON.stringify(RM.config.SETUP_DEFAULT_SORT));
+  1149→      SetupView.saveSort();
+  1150→      SetupView.renderSortBuilder();
+  1151→      SetupView.renderReportTable();
+  1152→      UI.toast('مرتب‌سازی گزارش ستاپ‌ها به حالت پیش‌فرض بازگشت.', 'info');
+  1153→    });
+  1154→  };
+  1155→
+  1156→  /** اعمال مرتب‌سازی چندمرحله‌ای روی ردیف‌های گزارش (از آخرین اولویت به اولین) */
+  1157→  SetupView.applySetupSort = function (rows) {
+  1158→    const sorted = [...rows];
+  1159→    for (let i = SetupView.sortPipeline.length - 1; i >= 0; i--) {
+  1160→      const { field, direction } = SetupView.sortPipeline[i];
+  1161→      sorted.sort((a, b) => {
+  1162→        if (field === 'cuttingPattern') {
+  1163→          const ka = Setups.normalizePatternKey(a.cuttingPattern) || '';
+  1164→          const kb = Setups.normalizePatternKey(b.cuttingPattern) || '';
+  1165→          const r = ka.localeCompare(kb, 'fa', { numeric: true });
+  1166→          return direction === 'desc' ? -r : r;
+  1167→        }
+  1168→        return U.compareNumeric(a[field], b[field], direction);
+  1169→      });
+  1170→    }
+  1171→    return sorted;
+  1172→  };
+  1173→  /* ---------------- پنل‌های قابل مخفی/ظاهر + ترتیب ستون‌ها (نسخهٔ ۲٫۳) ---------------- */
+  1174→
+  1175→  /** اعمال وضعیت نمایش/مخفی پنل مرتب‌سازی + پنل ترتیب ستون‌ها */
+  1176→  SetupView.applyPanelVisibility = function () {
+  1177→    const sortBuilder = document.getElementById('setup-sort-builder');
+  1178→    const sortToggle = document.getElementById('setup-sort-toggle');
+  1179→    if (sortBuilder && sortToggle) {
+  1180→      sortBuilder.hidden = !SetupView.sortPanelVisible;
+  1181→      sortToggle.setAttribute('aria-expanded', String(SetupView.sortPanelVisible));
+  1182→      sortToggle.innerHTML = SetupView.sortPanelVisible
+  1183→        ? `${UI.icons.cross} مخفی‌کردن پنل مرتب‌سازی`
+  1184→        : `${UI.icons.plus} نمایش پنل مرتب‌سازی`;
+  1185→      sortToggle.title = SetupView.sortPanelVisible
+  1186→        ? 'پنل مرتب‌سازی را مخفی کن (برای صرفه‌جویی در فضا)'
+  1187→        : 'پنل مرتب‌سازی را نمایش بده';
+  1188→    }
+  1189→
+  1190→    const colsBuilder = document.getElementById('setup-cols-builder');
+  1191→    const colsToggle = document.getElementById('setup-cols-toggle');
+  1192→    if (colsBuilder && colsToggle) {
+  1193→      colsBuilder.hidden = !SetupView.colsPanelVisible;
+  1194→      colsToggle.setAttribute('aria-expanded', String(SetupView.colsPanelVisible));
+  1195→      colsToggle.innerHTML = SetupView.colsPanelVisible
+  1196→        ? `${UI.icons.cross} مخفی‌کردن پنل ترتیب ستون‌ها`
+  1197→        : `${UI.icons.plus} نمایش پنل ترتیب ستون‌ها`;
+  1198→      colsToggle.title = SetupView.colsPanelVisible
+  1199→        ? 'پنل ترتیب ستون‌ها را مخفی کن (برای صرفه‌جویی در فضا)'
+  1200→        : 'پنل ترتیب ستون‌ها را نمایش بده';
+  1201→    }
+  1202→  };
+  1203→
+  1204→  /** رندر پنل «ترتیب ستون‌ها» — چیپ‌های کشیدنی + باکس عرض هر ستون (نسخهٔ ۲٫۴:
+  1205→      بجای فلش‌های ↑/↓، کاربر عرض دلخواه هر ستون را در باکس عددی وارد می‌کند) */
+  1206→  SetupView.renderColumnOrderPanel = function () {
+  1207→    const all = SetupView.reportColumns();
+  1208→    const widths = SetupView.columnWidths || {};
+  1209→    const items = SetupView.columnOrder
+  1210→      .map((key) => all[key])
+  1211→      .filter(Boolean)
+  1212→      .map((c) => ({ key: c.key, label: c.label, width: widths[c.key] ?? 0 }));
+  1213→
+  1214→    UI.orderPanel(document.getElementById('setup-cols-pipeline'), items, {
+  1215→      onMove: async (from, to) => {
+  1216→        const [moved] = SetupView.columnOrder.splice(from, 1);
+  1217→        SetupView.columnOrder.splice(to, 0, moved);
+  1218→        await RM.db.setSetting('setupColumnOrder', SetupView.columnOrder);
+  1219→        SetupView.renderColumnOrderPanel();
+  1220→        SetupView.renderReportTable();
+  1221→      },
+  1222→      // تغییر عرض یک ستون (px) — ماندگار + رندر مجدد جدول (نسخهٔ ۲٫۴)
+  1223→      onWidth: async (key, w) => {
+  1224→        SetupView.columnWidths = SetupView.columnWidths || {};
+  1225→        SetupView.columnWidths[key] = w;
+  1226→        await RM.db.setSetting('setupColumnWidths', SetupView.columnWidths);
+  1227→        SetupView.renderReportTable();
+  1228→      },
+  1229→      emptyText: 'بدون ستون',
+  1230→    });
+  1231→  };
+  1232→
+  1233→  /* ---------------- رجیستری ستون‌های گزارش (نسخهٔ ۲٫۳) ----------------
+  1234→     هر ستون: render + tokens (متن‌های قابل‌جست‌وجو برای فیلتر «شامل بودن»).
+  1235→     ترتیب نمایش از SetupView.columnOrder (قابل تغییر با پنل ترتیب ستون‌ها). */
+  1236→
+  1237→  SetupView.reportColumns = function () {
+  1238→    /* توکن‌های زمان (نسخهٔ ۲٫۴): نمایش [H]:mm + مقدار خام دقیقه + ساعت گرد */
+  1239→    const durationTokens = (r, key) => {
+  1240→      const v = r[key];
+  1241→      return v === null
+  1242→        ? ['بدون قانون']
+  1243→        : [U.faHMM(v), String(v), String(Math.round(v / 60))];
+  1244→    };
+  1245→    const widths = SetupView.columnWidths || {};
+  1246→
+  1247→    const registry = {
+  1248→      setupNumber: {
+  1249→        key: 'setupNumber', label: 'ستاپ', className: 'em-cell',
+  1250→        render: (r) => U.faNum(r.setupNumber),
+  1251→        tokens: (r) => [U.faNum(r.setupNumber), String(r.setupNumber ?? '')],
+  1252→      },
+  1253→      machineNumber: {
+  1254→        key: 'machineNumber', label: 'دستگاه',
+  1255→        render: (r) => U.faNum(r.machineNumber),
+  1256→        tokens: (r) => [U.faNum(r.machineNumber), String(r.machineNumber ?? '')],
+  1257→      },
+  1258→      width: {
+  1259→        key: 'width', label: 'عرض', className: 'em-cell',
+  1260→        render: (r) => U.faWidth(r.width),
+  1261→        tokens: (r) => [U.faWidth(r.width), String(r.width ?? '')],
+  1262→      },
+  1263→      thickness: {
+  1264→        key: 'thickness', label: 'ضخامت',
+  1265→        render: (r) => r.thickness === null ? '<span class="muted">ناقص</span>' : U.faNum(r.thickness),
+  1266→        tokens: (r) => r.thickness === null ? ['ناقص'] : [U.faNum(r.thickness), String(r.thickness)],
+  1267→      },
+  1268→      standardLength: {
+  1269→        key: 'standardLength', label: 'متراژ استاندارد',
+  1270→        render: (r) => r.standardLength === null ? '<span class="muted">ناقص</span>' : U.faNum(r.standardLength),
+  1271→        tokens: (r) => r.standardLength === null ? ['ناقص'] : [U.faNum(r.standardLength), String(r.standardLength)],
+  1272→      },
+  1273→      setCount: {
+  1274→        /* تغییر ۱ — تعداد ست: متراژ استاندارد ÷ کوچکترین استاندارد ضخامت */
+  1275→        key: 'setCount', label: 'تعداد ست',
+  1276→        render: (r) => r.setCount === null
+  1277→          ? '<span class="muted" title="ضخامت/متراژ استاندارد این رکورد در قوانین متراژ تعریف نشده">—</span>'
+  1278→          : `<span class="num-set" title="${U.faNum(r.standardLength)} ÷ ${U.faNum(r.setBase)} (کوچکترین استاندارد ضخامت ${U.faNum(r.thickness)}) = ${U.faNum(r.setCount)}">${U.faNum(r.setCount)}</span>`,
+  1279→        tokens: (r) => r.setCount === null ? [] : [U.faNum(r.setCount), String(r.setCount)],
+  1280→      },
+  1281→      rollCount: {
+  1282→        key: 'rollCount', label: 'تعداد', className: 'count-cell',
+  1283→        render: (r) => U.faNum(r.rollCount),
+  1284→        tokens: (r) => [U.faNum(r.rollCount), String(r.rollCount ?? '')],
+  1285→      },
+  1286→      cuttingPattern: {
+  1287→        key: 'cuttingPattern', label: 'الگوی برش',
+  1288→        render: SetupView.renderPatternCards,
+  1289→        tokens: (r) => [
+  1290→          String(r.cuttingPattern ?? ''),
+  1291→          Setups.normalizePatternKey(r.cuttingPattern) || '',
+  1292→        ],
+  1293→      },
+  1294→      rawExisting: {
+  1295→        key: 'rawExisting', label: 'خام موجود',
+  1296→        render: (r) => `<span class="num-raw">${U.faNum(r.rawExisting)}</span>`,
+  1297→        tokens: (r) => [U.faNum(r.rawExisting), String(r.rawExisting ?? '')],
+  1298→      },
+  1299→      metallized: {
+  1300→        key: 'metallized', label: 'متالایز',
+  1301→        render: (r) => `<span class="num-metal">${U.faNum(r.metallized)}</span>`,
+  1302→        tokens: (r) => [U.faNum(r.metallized), String(r.metallized ?? '')],
+  1303→      },
+  1304→      uncut: {
+  1305→        key: 'uncut', label: 'برش‌نشده',
+  1306→        render: (r) => r.conflict > 0
+  1307→          ? `<span class="num-uncut">${U.faNum(r.uncut)}</span><span class="conflict-badge" title="مغایرت ظرفیت (§86)">⚠ ${U.faNum(r.conflict)}</span>`
+  1308→          : `<span class="num-uncut">${U.faNum(r.uncut)}</span>`,
+  1309→        tokens: (r) => [U.faNum(r.uncut), String(r.uncut ?? ''), String(r.conflict ?? '')],
+  1310→      },
+  1311→      remainingSetupTime: {
+  1312→        key: 'remainingSetupTime', label: 'مانده زمان ستاپ', className: 'time-cell',
+  1313→        // نسخهٔ ۲٫۴: فرمت تایم [H]:mm (مثل 487:42)
+  1314→        render: (r) => r.remainingSetupTime === null
+  1315→          ? '<span class="muted" title="قانون زمان متالایز برای دستگاه + متراژ استاندارد این رکورد تعریف نشده">بدون قانون</span>'
+  1316→          : `<span class="num-time" title="${U.faDuration(r.remainingSetupTime)}">${U.faHMM(r.remainingSetupTime)}</span>`,
+  1317→        tokens: (r) => durationTokens(r, 'remainingSetupTime'),
+  1318→      },
+  1319→      remainingProducedTime: {
+  1320→        key: 'remainingProducedTime', label: 'مانده زمان موجودی', className: 'time-cell',
+  1321→        // نسخهٔ ۲٫۴: تغییر نام از «تولید شده» + فرمت تایم [H]:mm
+  1322→        render: (r) => r.remainingProducedTime === null
+  1323→          ? '<span class="muted" title="قانون زمان متالایز برای دستگاه + متراژ استاندارد این رکورد تعریف نشده">بدون قانون</span>'
+  1324→          : `<span class="num-time time-produced" title="${U.faDuration(r.remainingProducedTime)}">${U.faHMM(r.remainingProducedTime)}</span>`,
+  1325→        tokens: (r) => durationTokens(r, 'remainingProducedTime'),
+  1326→      },
+  1327→      actions: {
+  1328→        key: 'actions', label: 'عملیات', filterable: false,
+  1329→        render: (r) => `
+  1330→          <div class="row-actions">
+  1331→            <button type="button" class="btn btn-ghost btn-icon" data-audit="${r.id}" title="جزئیات محاسبه (Audit)" aria-label="جزئیات محاسبه">${UI.icons.audit}</button>
+  1332→            <button type="button" class="btn btn-ghost btn-icon" data-edit="${r.id}" title="ویرایش" aria-label="ویرایش">${UI.icons.edit}</button>
+  1333→            <button type="button" class="btn btn-icon" data-del="${r.id}" title="حذف" aria-label="حذف">${UI.icons.trash}</button>
+  1334→          </div>`,
+  1335→      },
+  1336→    };
+  1337→
+  1338→    /* عرض هر ستون از پنل ترتیب ستون‌ها (نسخهٔ ۲٫۴) — 0/خالی = خودکار */
+  1339→    for (const col of Object.values(registry)) {
+  1340→      const w = Number(widths[col.key]);
+  1341→      col.width = Number.isFinite(w) && w > 0 ? w : undefined;
+  1342→    }
+  1343→    return registry;
+  1344→  };
+  1345→
+  1346→  /** رندر جدول گزارش (نسخهٔ ۲٫۳) — کامپوننت مشترک UI.filterTable:
+  1347→      ارتفاع ۵۰ رکورد + فیلتر «شامل بودن» زیر سرستون‌ها + دکمهٔ «≠» +
+  1348→      حفظ فوکوس + ترتیب ستون‌های قابل تغییر — از موتور محاسبه (§79) */
+  1349→  SetupView.renderReportTable = async function () {
+  1350→    const state = await RM.calcEngine.getState();
+  1351→    const report = state.setupReport;
+  1352→    const rows = SetupView.applySetupSort(report);
+  1353→
+  1354→    const wrap = document.getElementById('setup-table-wrap');
+  1355→    const all = SetupView.reportColumns();
+  1356→    const columns = (SetupView.columnOrder || RM.config.SETUP_DEFAULT_COLUMN_ORDER)
+  1357→      .map((key) => all[key])
+  1358→      .filter(Boolean);
+  1359→
+  1360→    UI.filterTable(wrap, columns, rows, {
+  1361→      state: SetupView,                      // filters + visibleRows (ماندگار)
+  1362→      visibleRows: RM.config.SETUP_VISIBLE_ROWS,
+  1363→      rowHeight: 56,                         // ردیف‌های این جدول بلندترند (کارت‌های الگو)
+  1364→      tableClass: 'cut-table setup-table',
+  1365→      emptyText: 'هنوز ستاپی ثبت نشده — از فرم «ثبت رول جدید برای ستاپ» اولین رکورد را وارد کنید.',
+  1366→      filteredEmptyText: 'هیچ ردیفی با فیلترهای فعلی مطابقت ندارد — فیلترها را پاک کنید.',
+  1367→      footerNote: 'فیلتر هر ستون زیر سرستون همان ستون · منطق: شامل بودن (اعداد و متن‌ها) · دکمهٔ «≠» = شامل نشود · فوکوس حفظ می‌شود · زمان‌ها با فرمت [H]:mm · باکس‌های Σ پایین جدول با دیتای فیلترشده به‌روز می‌شوند',
+  1368→      // باکس‌های جمع زیر ستون‌ها (نسخهٔ ۲٫۶) — با احترام به فیلترهای فعال
+  1369→      sums: {
+  1370→        rollCount:              { type: 'number' },   // تعداد
+  1371→        rawExisting:            { type: 'number' },   // خام موجود
+  1372→        metallized:             { type: 'number' },   // متالایز
+  1373→        uncut:                  { type: 'number' },   // برش‌نشده
+  1374→        remainingSetupTime:     { type: 'time' },     // مانده زمان ستاپ — [H]:mm
+  1375→        remainingProducedTime:  { type: 'time' },     // مانده زمان موجودی — [H]:mm
+  1376→      },
+  1377→      // نسخهٔ ۲٫۴: باکس تعداد ردیف + ماندگاری مقدار
+  1378→      onRowsChange: (n) => RM.db.setSetting('setupVisibleRows', n),
+  1379→      // رویدادهای ردیف پس از هر رندر بدنه
+  1380→      onRendered: () => {
+  1381→        wrap.querySelectorAll('[data-edit]').forEach((btn) =>
+  1382→          btn.addEventListener('click', () => SetupView.startEdit(Number(btn.dataset.edit)))
+  1383→        );
+  1384→        wrap.querySelectorAll('[data-del]').forEach((btn) =>
+  1385→          btn.addEventListener('click', () => SetupView.removeRecord(Number(btn.dataset.del)))
+  1386→        );
+  1387→        wrap.querySelectorAll('[data-audit]').forEach((btn) =>
+  1388→          btn.addEventListener('click', () => SetupView.showAudit(Number(btn.dataset.audit), state))
+  1389→        );
+  1390→      },
+  1391→    });
+  1392→  };
+  1393→
+  1394→  /** رندر کامل نما (چیپ‌ها + پنل مرتب‌سازی + جدول) — از موتور محاسبه */
+  1395→  SetupView.render = async function () {
+  1396→    const state = await RM.calcEngine.getState();
+  1397→    // قوانین برای دراپ‌داون فرم (بارگذاری مجدد — پس از تغییر قوانین هم تازه است)
+  1398→    SetupView.currentRules = await db.standardLengthRules.toArray();
+  1399→
+  1400→    const report = state.setupReport;
+  1401→
+  1402→    // چیپ‌های خلاصه
+  1403→    const s = state.summary;
+  1404→    document.getElementById('setup-chips').innerHTML = `
+  1405→      <span class="chip">${U.faNum(report.length)} رکورد</span>
+  1406→      <span class="chip chip-strong">مجموع: ${U.faNum(s.totalSetupRolls)} رول</span>
+  1407→      <span class="chip">خام موجود: ${U.faNum(s.rawMatchedCount)}</span>
+  1408→      <span class="chip">متالایز: ${U.faNum(s.metallizedAllocated)}</span>
+  1409→      <span class="chip ${s.totalConflict > 0 ? 'chip-warn' : 'chip-ok'}">
+  1410→        برش‌نشده: ${U.faNum(s.totalUncut)}${s.totalConflict > 0 ? ` · مغایرت ${U.faNum(s.totalConflict)}` : ''}
+  1411→      </span>
+  1412→      <span class="chip">مانده زمان ستاپ: ${U.faHMM(s.totalRemainingSetupTime)}</span>
+  1413→      <span class="chip">مانده زمان موجودی: ${U.faHMM(s.totalRemainingProducedTime)}</span>
+  1414→    `;
+  1415→
+  1416→    document.getElementById('btn-clear-setups').hidden = report.length === 0;
+  1417→
+  1418→    SetupView.renderSortBuilder();
+  1419→    SetupView.renderColumnOrderPanel();
+  1420→    await SetupView.renderReportTable();
+  1421→  };
+  1422→
+  1423→  /* ================================================================
+  1424→     ۷) جزئیات Audit تخصیص (§45)
+  1425→     ================================================================ */
+  1426→
+  1427→  SetupView.showAudit = function (id, state) {
+  1428→    const r = state.setupReport.find((x) => x.id === id);
+  1429→    if (!r) return;
+  1430→
+  1431→    // یافتن سایر ستاپ‌های دارای همان کلید متالایز برای گزارش تخصیص
+  1432→    const metPeers = state.setupReport.filter(
+  1433→      (x) => x.id !== id && x.audit.metGroup && r.audit.metGroup && x.audit.metGroup.key === r.audit.metGroup.key
+  1434→    );
+  1435→
+  1436→    const peersHtml = metPeers.length
+  1437→      ? `<p class="muted" style="font-size:.78rem">سایر دستگاه‌های همین کلید متالایز:</p>
+  1438→         <ul class="audit-peers">${metPeers.map((p) =>
+  1439→          `<li>دستگاه ${U.faNum(p.machineNumber)}: ظرفیت ${U.faNum(p.audit.metCapacity)} — تخصیص ${U.faNum(p.metallized)}</li>`
+  1440→        ).join('')}</ul>`
+  1441→      : '';
+  1442→
+  1443→    const rawGroupInfo = r.audit.rawGroup
+  1444→      ? `${U.faNum(r.audit.rawGroup.count)} رول خام برای کلید <code>${U.escapeHtml(r.audit.rawGroup.key)}</code> شناسایی شد؛
+  1445→         ${U.faNum(r.rawExisting)} رول تا سقف ظرفیت این ستاپ تخصیص یافت.`
+  1446→      : 'هیچ گروه رول خام منطبقی (عرض + متراژ استاندارد + ستاپ) یافت نشد.';
+  1447→
+  1448→    const metGroupInfo = r.audit.metGroup
+  1449→      ? `${U.faNum(r.audit.metGroup.count)} رول متالایز یونیک برای کلید <code>${U.escapeHtml(r.audit.metGroup.key)}</code> شناسایی شد؛
+  1450→         ${U.faNum(r.metallized)} رول به این دستگاه تخصیص یافت.`
+  1451→      : 'هیچ رول متالایز منطبقی (عرض + ستاپ) یافت نشد.';
+  1452→
+  1453→    const timeInfo = r.durationMin !== null
+  1454→      ? `قانون زمان: دستگاه ${U.faNum(r.machineNumber)} + متراژ ${U.faNum(r.standardLength)} →
+  1455→         هر رول <b>${U.faNumPlain(r.durationMin)} دقیقه</b> ·
+  1456→         مانده زمان ستاپ = ${U.faNumPlain(r.durationMin)} × ${U.faNum(r.rollCount)} = <b>${U.faHMM(r.remainingSetupTime)}</b> ·
+  1457→         مانده زمان موجودی = ${U.faNumPlain(r.durationMin)} × (${U.faNum(r.rollCount)} − ${U.faNum(r.metallized)})${r.rollCount - r.metallized < 0 ? ' → پایهٔ منفی → ۰' : ''} = <b>${U.faHMM(r.remainingProducedTime)}</b>`
+  1458→      : 'قانون زمان متالایزی برای ترکیب دستگاه + متراژ استاندارد این رکورد تعریف نشده — ستون‌های «مانده زمان» محاسبه نمی‌شوند.';
+  1459→
+  1460→    /* --- تعداد ست و رول‌های فرزند الگو (تغییر ۱) --- */
+  1461→    const parsedPattern = Setups.parsePattern(r.cuttingPattern);
+  1462→    let setInfo;
+  1463→    if (r.setCount !== null && parsedPattern.ok && parsedPattern.parts.length) {
+  1464→      const mult = new Map();
+  1465→      for (const p of parsedPattern.parts) mult.set(p, (mult.get(p) || 0) + 1);
+  1466→      const childRows = [...mult.entries()]
+  1467→        .map(([w, m]) => `<li>عرض ${U.faWidth(w)}: ${U.faNum(m)} (تکرار در الگو) × ${U.faNum(r.setCount)} (ست) = <b>${U.faNum(m * r.setCount)} رول</b> از هر مادر</li>`)
+  1468→        .join('');
+  1469→      setInfo = `
+  1470→        کوچکترین متراژ استاندارد ضخامت ${U.faNum(r.thickness)} = <b>${U.faNum(r.setBase)}</b> (رول ۱ ستی) →
+  1471→        تعداد ست = ${U.faNum(r.standardLength)} ÷ ${U.faNum(r.setBase)} = <b>${U.faNum(r.setCount)}</b><br>
+  1472→        تعداد فرزند هر مادر: <b>${U.faNum(parsedPattern.parts.length * r.setCount)} رول</b>؛
+  1473→        از ${U.faNum(r.rollCount)} رول مادر در مجموع: <b>${U.faNum(parsedPattern.parts.length * r.setCount * r.rollCount)} رول فرزند</b>
+  1474→        <ul class="audit-peers">${childRows}</ul>`;
+  1475→    } else if (r.setCount !== null) {
+  1476→      setInfo = `تعداد ست = ${U.faNum(r.standardLength)} ÷ ${U.faNum(r.setBase)} = <b>${U.faNum(r.setCount)}</b> — الگوی برشی برای این رکورد ثبت نشده است.`;
+  1477→    } else {
+  1478→      setInfo = 'ضخامت/متراژ استاندارد این رکورد در قوانین متراژ تعریف نشده — تعداد ست محاسبه نمی‌شود (بدون الگو نیز فرزندی حساب نمی‌شود).';
+  1479→    }
+  1480→
+  1481→    UI.infoModal(
+  1482→      `جزئیات محاسبه — ستاپ ${U.faNum(r.setupNumber)} / دستگاه ${U.faNum(r.machineNumber)}`,
+  1483→      `
+  1484→      <div class="audit-stats">
+  1485→        <div>تعداد ستاپ: <b>${U.faNum(r.rollCount)}</b></div>
+  1486→        <div>خام موجود: <b>${U.faNum(r.rawExisting)}</b></div>
+  1487→        <div>متالایز: <b>${U.faNum(r.metallized)}</b></div>
+  1488→        <div>برش‌نشده: <b>${U.faNum(r.uncut)}</b></div>
+  1489→        ${r.conflict > 0 ? `<div class="audit-conflict">⚠ مغایرت ظرفیت: <b>${U.faNum(r.conflict)} رول</b><br>
+  1490→          <span style="font-size:.75rem">${U.faNum(r.rawExisting)} + ${U.faNum(r.metallized)} > ظرفیت ${U.faNum(r.rollCount)}</span></div>` : ''}
+  1491→      </div>
+  1492→      <div class="audit-section"><h4>مانده زمان متالایز</h4><p>${timeInfo}</p></div>
+  1493→      <div class="audit-section"><h4>تعداد ست و رول‌های فرزند الگو (تغییر ۱)</h4><p>${setInfo}</p></div>
+  1494→      <div class="audit-section"><h4>ریشهٔ رول‌های خام (کلید ۳فاکتوری)</h4><p>${rawGroupInfo}</p></div>
+  1495→      <div class="audit-section"><h4>ریشهٔ متالایزها (کلید ۲فاکتوری)</h4><p>${metGroupInfo}</p></div>
+  1496→      ${peersHtml}
+  1497→      <div class="audit-formula">
+  1498→        برش‌نشده = ${U.faNum(r.rollCount)} − (${U.faNum(r.rawExisting)} + ${U.faNum(r.metallized)}) =
+  1499→        <b>${U.faNum(r.uncutCalculated)}</b>${r.conflict > 0 ? ` → نمایش ${U.faNum(r.uncut)} + مغایرت ${U.faNum(r.conflict)}` : ''}
+  1500→      </div>
+  1501→      `
+  1502→    );
+  1503→  };
+  1504→
+  1505→  RM.views = RM.views || {};
+  1506→  RM.views.setup = SetupView;
+  1507→})();
+  1508→
