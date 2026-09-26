@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<!-- ============================================================
+     سامانه مانیتورینگ رول‌های EVA — نسخهٔ ۱٫۴ (آفلاین)
+     نسخهٔ مستقل و کاملاً آفلاین: بدون سرور و بدون اینترنت؛
+     داده‌ها در همین مرورگر (IndexedDB) نگهداری می‌شوند.
+     ساختار شمارهٔ رول / قوانین دسته‌بندی / پیام‌ها عین نسخهٔ وب‌اند.
+     ============================================================ -->
+<html dir="rtl" lang="fa">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>سامانه مانیتورینگ رول‌های EVA — نسخهٔ ۱٫۴ (آفلاین)</title>
+  <meta name="description" content="پایش رول‌های خام، EVA و برش‌خورده — محاسبهٔ مانده زمان تولید (نسخهٔ آفلاین)" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230a7568' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+  <div class="app-shell">
+
+    <!-- ================= سربرگ ================= -->
+    <header class="app-header">
+      <div class="app-header-inner">
+        <div class="brand">
+          <div class="brand-icon" id="brand-icon" aria-hidden="true"></div>
+          <div style="min-width:0">
+            <h1>سامانه مانیتورینگ رول‌های EVA</h1>
+            <p>پایش رول‌های خام، EVA و برش‌خورده — محاسبه مانده زمان تولید</p>
+          </div>
+        </div>
+        <div class="header-side" id="header-side">
+          <!-- بج آخرین ورود داده‌ها (با جاوااسکریپت پر می‌شود) -->
+        </div>
+      </div>
+    </header>
+
+    <!-- ================= ناوبری زبانه‌ها ================= -->
+    <nav class="tabs-bar" aria-label="ناوبری اصلی">
+      <div class="tabs-bar-inner nice-scroll" id="tabs-bar" role="tablist">
+        <button class="tab-btn" role="tab" data-tab="dashboard" id="tab-dashboard" aria-controls="view-dashboard">
+          <span data-icon="layout-dashboard" aria-hidden="true"></span>داشبورد
+        </button>
+        <button class="tab-btn" role="tab" data-tab="import" id="tab-import" aria-controls="view-import">
+          <span data-icon="upload" aria-hidden="true"></span>ورود داده‌ها
+        </button>
+        <button class="tab-btn" role="tab" data-tab="rolls" id="tab-rolls" aria-controls="view-rolls">
+          <span data-icon="rolls" aria-hidden="true"></span>رول‌ها
+        </button>
+        <button class="tab-btn" role="tab" data-tab="settings" id="tab-settings" aria-controls="view-settings">
+          <span data-icon="settings-2" aria-hidden="true"></span>تنظیمات
+        </button>
+        <button class="tab-btn" role="tab" data-tab="help" id="tab-help" aria-controls="view-help">
+          <span data-icon="book-open" aria-hidden="true"></span>راهنما
+        </button>
+      </div>
+    </nav>
+
+    <!-- ================= محتوا ================= -->
+    <main class="app-main" id="main">
+      <section id="view-dashboard" role="tabpanel" aria-labelledby="tab-dashboard" hidden></section>
+      <section id="view-import" role="tabpanel" aria-labelledby="tab-import" hidden></section>
+      <section id="view-rolls" role="tabpanel" aria-labelledby="tab-rolls" hidden></section>
+      <section id="view-settings" role="tabpanel" aria-labelledby="tab-settings" hidden></section>
+      <section id="view-help" role="tabpanel" aria-labelledby="tab-help" hidden></section>
+    </main>
+
+    <!-- ================= پاصفحه (چسبان به پایین) ================= -->
+    <footer class="app-footer">
+      <div class="app-footer-inner">
+        <p id="footer-version" style="margin:0">سامانه مانیتورینگ رول‌های EVA — نسخهٔ ۱٫۴ (آفلاین)</p>
+        <p class="formula" style="margin:0">
+          <span data-icon="factory" aria-hidden="true"></span>
+          مانده زمان = وزن خالص رول‌های خام ÷ (ظرفیت شیفت × تعداد شیفت در روز)
+        </p>
+      </div>
+    </footer>
+  </div>
+
+  <!-- ناحیهٔ اعلان‌ها (Toast) -->
+  <div class="toast-zone" id="toast-zone" aria-live="polite"></div>
+
+  <!-- ================= اسکریپت‌ها (ترتیب بارگذاری مهم است) ================= -->
+  <!-- کتابخانه‌های محلی (بدون هیچ درخواست شبکه) -->
+  <script src="js/vendor/xlsx.full.min.js"></script>
+  <script src="js/vendor/chart.umd.min.js"></script>
+  <!-- دادهٔ اولیهٔ سامانه (۸٬۱۸۹ رول واقعی) -->
+  <script src="js/seed-data.js"></script>
+  <!-- ماژول‌های برنامه (اسکریپت کلاسیک + فضای‌نام سراسری — سازگار با file://) -->
+  <script src="js/format.js"></script>
+  <script src="js/domain.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/tables.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/views/dashboard.js"></script>
+  <script src="js/views/import.js"></script>
+  <script src="js/views/rolls.js"></script>
+  <script src="js/views/settings.js"></script>
+  <script src="js/views/help.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
